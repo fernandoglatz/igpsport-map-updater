@@ -13,7 +13,7 @@ Instead of manual conversion, you can use the automated PowerShell script:
 The script automatically:
 - Detects all `.pbf` files in the folder
 - Processes each file through Osmosis
-- Reads map metadata (date, bounding box)
+- Reads map metadata (bounding box)
 - Generates IGPSPORT-compatible file names
 
 ### Information about maps for IGPSport cycling computers ###
@@ -110,6 +110,11 @@ Osmosis --rbf file="./input.osm.pbf" --tag-filter reject-ways amenity=* highway=
     <osm-tag key="waterway" value="river" zoom-appear="13"/>
     <osm-tag key="waterway" value="riverbank" zoom-appear="13"/>
     <osm-tag key="waterway" value="canal" zoom-appear="14"/>
+    <osm-tag key="waterway" value="stream" zoom-appear="14"/>
+  </ways>
+
+  <ways>
+    <osm-tag key="landuse" value="forest" zoom-appear="14"/>
   </ways>
 
   <ways>
