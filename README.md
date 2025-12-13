@@ -1,4 +1,4 @@
-# IGPSport BSC300/BSC300T/IGS630s and XOSS Nav
+# IGPSport BSC300/BSC300T/IGS630s and XOSS Nav Map #
 
 ### Quick Conversion Using `convert.ps1` ###
 
