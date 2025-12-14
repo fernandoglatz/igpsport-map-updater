@@ -237,6 +237,8 @@ Map files must have a specific name format. Unfortunately, IGPSport support does
 
 After reverse-engineering the IGPSPORT map file naming convention, we discovered how the geographic information is encoded. The file name follows this structure:
 
+![File Name Structure](images/filename-structure.svg)
+
 ```
 [CC][RRRR][DATE][GEO_CODE]
 ```
@@ -250,6 +252,8 @@ Where:
 #### Geographic Code Encoding (Tile-based at Zoom 13) ####
 
 The 12-character geographic code encodes the map's bounding box using a tile-based system at zoom level 13 (N = 8192 tiles per side), with values encoded in Base36:
+
+![Tile Grid Concept](images/tile-grid-concept.svg)
 
 | Position | Length | Name | Description | Formula |
 |----------|--------|------|-------------|---------|
