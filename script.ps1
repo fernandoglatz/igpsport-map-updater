@@ -1,9 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
-if ([string]::IsNullOrEmpty($SCRIPT_DIR)) {
-    $SCRIPT_DIR = Get-Location
-}
+$SCRIPT_DIR = $PSScriptRoot
 
 # Download and extract osmosis if not present
 $OSMOSIS_VERSION = "0.49.2"
@@ -40,34 +37,30 @@ if (-not (Test-Path $MAPSFORGE_WRITER_JAR)) {
     Write-Host ""
 }
 
-# Create wrapper batch script that includes Mapsforge in classpath
+# Create wrapper script that includes Mapsforge in classpath
 $OSMOSIS_WRAPPER = Join-Path $OSMOSIS_DIR "bin\osmosis-with-mapsforge.bat"
+$OSMOSIS_SCRIPT = Join-Path $OSMOSIS_DIR "bin\osmosis.bat"
+
 if (-not (Test-Path $OSMOSIS_WRAPPER)) {
     $MAPSFORGE_JAR_NAME = "mapsforge-map-writer-$MAPSFORGE_WRITER_VERSION-jar-with-dependencies.jar"
-    $OSMOSIS_BAT = Join-Path $OSMOSIS_DIR "bin\osmosis.bat"
-    
-    # Read original osmosis.bat
-    $content = Get-Content $OSMOSIS_BAT -Raw
-    
-    # Add Mapsforge JAR to classpath
-    $content = $content -replace '(set CLASSPATH=)', "`$1%APP_HOME%\lib\$MAPSFORGE_JAR_NAME;"
-    
-    # Write wrapper
-    Set-Content -Path $OSMOSIS_WRAPPER -Value $content
+    $content = Get-Content $OSMOSIS_SCRIPT -Raw
+    $content = $content -replace '(set CLASSPATH=%APP_HOME%)', "`$1\lib\$MAPSFORGE_JAR_NAME;%APP_HOME%"
+    $content | Set-Content $OSMOSIS_WRAPPER
 }
 
 $TAG_CONF_FILE = Join-Path $SCRIPT_DIR "tag-igpsport.xml"
 $THREADS = 1
 $TMP_DIR = Join-Path $SCRIPT_DIR "tmp"
 $env:JAVA_OPTS = "-Xms1g -Xmx8g -Djava.io.tmpdir=$TMP_DIR"
+$env:CLASSPATH = "$MAPSFORGE_WRITER_JAR;$env:CLASSPATH"
 
 # Create directories
 $DOWNLOAD_DIR = Join-Path $SCRIPT_DIR "download"
 $OUTPUT_DIR = Join-Path $SCRIPT_DIR "output"
 
-if (-not (Test-Path $TMP_DIR)) { New-Item -ItemType Directory -Path $TMP_DIR | Out-Null }
-if (-not (Test-Path $DOWNLOAD_DIR)) { New-Item -ItemType Directory -Path $DOWNLOAD_DIR | Out-Null }
-if (-not (Test-Path $OUTPUT_DIR)) { New-Item -ItemType Directory -Path $OUTPUT_DIR | Out-Null }
+New-Item -ItemType Directory -Force -Path $TMP_DIR | Out-Null
+New-Item -ItemType Directory -Force -Path $DOWNLOAD_DIR | Out-Null
+New-Item -ItemType Directory -Force -Path $OUTPUT_DIR | Out-Null
 
 # Check if maps.csv exists
 $CSV_FILE = Join-Path $SCRIPT_DIR "maps.csv"
@@ -82,9 +75,9 @@ $PBF_FILES = @()
 $POLY_FILES = @()
 $ORIGINAL_NAMES = @()
 
-$csv_data = Import-Csv -Path $CSV_FILE
+$csv = Import-Csv $CSV_FILE
 
-foreach ($row in $csv_data) {
+foreach ($row in $csv) {
     $original_name = $row.original_name
     $pbf_url = $row.pbf_url
     $poly_url = $row.poly_url
@@ -142,154 +135,191 @@ if (-not (Test-Path $TAG_CONF_FILE)) {
     Write-Error "ERROR: Tag configuration file not found: $TAG_CONF_FILE"
     exit 1
 }
-$MagicString = "mapsforge binary OSM"
-$DefaultZoom = 13
-$Zoom = 1 -shl $DefaultZoom
-$Base36Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-function Read-BigEndianLong {
-    param([System.IO.BinaryReader]$reader)
-    $bytes = $reader.ReadBytes(8)
-    [long]$result = 0
-    foreach ($b in $bytes) {
-        $result = ($result -shl 8) + $b
-    }
-    return $result
-}
+$MAGIC_STRING = "mapsforge binary OSM"
+$DEFAULT_ZOOM = 13
+$ZOOM = [math]::Pow(2, $DEFAULT_ZOOM)
+$BASE36_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 function Read-BigEndianInt32 {
     param([System.IO.BinaryReader]$reader)
-    $b = $reader.ReadBytes(4)
-    if ($b.Length -ne 4) { throw "EOF while reading int32" }
-    $u = ([uint32]$b[0] -shl 24) -bor
-         ([uint32]$b[1] -shl 16) -bor
-         ([uint32]$b[2] -shl  8) -bor
-         ([uint32]$b[3])
-    if ($u -ge 0x80000000) { return [int32]($u - 0x100000000) }
-    return [int32]$u
+    
+    $bytes = $reader.ReadBytes(4)
+    if ($bytes.Length -lt 4) {
+        throw "EOF while reading int32"
+    }
+    
+    $value = [uint32](($bytes[0] -shl 24) -bor ($bytes[1] -shl 16) -bor ($bytes[2] -shl 8) -bor $bytes[3])
+    
+    if ($value -ge 2147483648) {
+        return [int32]($value - 4294967296)
+    }
+    return [int32]$value
 }
 
-function ConvertTo-Base36 {
+function Read-BigEndianInt64 {
+    param([System.IO.BinaryReader]$reader)
+    
+    $bytes = $reader.ReadBytes(8)
+    if ($bytes.Length -lt 8) {
+        throw "EOF while reading int64"
+    }
+    
+    $value = [uint64]0
+    for ($i = 0; $i -lt 8; $i++) {
+        $value = ($value -shl 8) -bor $bytes[$i]
+    }
+    
+    return [int64]$value
+}
+
+function Convert-ToBase36 {
     param([int]$value, [int]$length)
-    if ($value -lt 0) { $value = 0 }
-    $result = New-Object char[] $length
-    for ($i = $length - 1; $i -ge 0; $i--) {
-        $result[$i] = $Base36Chars[$value % 36]
+    
+    if ($value -lt 0) {
+        $value = 0
+    }
+    
+    $result = ""
+    for ($i = 0; $i -lt $length; $i++) {
+        $result = $BASE36_CHARS[$value % 36] + $result
         $value = [math]::Floor($value / 36)
     }
-    return -join $result
+    
+    return $result
 }
 
-function ConvertTo-TileX {
-    param([double]$lon, [int]$tilesPerSide)
-    [math]::Floor((($lon + 180.0) / 360.0) * $tilesPerSide)
+function Convert-ToTileX {
+    param([double]$lon, [double]$tiles_per_side)
+    
+    return [math]::Floor((($lon + 180.0) / 360.0) * $tiles_per_side)
 }
 
-function ConvertTo-TileY {
-    param([double]$lat, [int]$tilesPerSide)
-    $rad = $lat * [math]::PI / 180.0
-    [math]::Floor(((1.0 - [math]::Log([math]::Tan($rad) + 1.0 / [math]::Cos($rad)) / [math]::PI) / 2.0) * $tilesPerSide)
+function Convert-ToTileY {
+    param([double]$lat, [double]$tiles_per_side)
+    
+    $lat_rad = $lat * [math]::PI / 180.0
+    return [math]::Floor(((1.0 - ([math]::Log([math]::Tan($lat_rad) + (1.0 / [math]::Cos($lat_rad))) / [math]::PI)) / 2.0) * $tiles_per_side)
 }
 
 function Get-GeoName {
-    param([double]$minLng, [double]$maxLng, [double]$minLat, [double]$maxLat)
-    $xStart = ConvertTo-TileX -lon $minLng -tilesPerSide $Zoom
-    $yStart = ConvertTo-TileY -lat $maxLat -tilesPerSide $Zoom
-    $xEnd = ConvertTo-TileX -lon $maxLng -tilesPerSide $Zoom
-    $yEnd = ConvertTo-TileY -lat $minLat -tilesPerSide $Zoom
-    $xSpan = $xEnd - $xStart + 1
-    $ySpan = $yEnd - $yStart + 1
-    (ConvertTo-Base36 -value $xStart -length 3) +
-    (ConvertTo-Base36 -value $yStart -length 3) +
-    (ConvertTo-Base36 -value ($xSpan - 1) -length 3) +
-    (ConvertTo-Base36 -value ($ySpan - 1) -length 3)
+    param([double]$min_lng, [double]$max_lng, [double]$min_lat, [double]$max_lat)
+    
+    $x_start = Convert-ToTileX $min_lng $ZOOM
+    $y_start = Convert-ToTileY $max_lat $ZOOM
+    $x_end = Convert-ToTileX $max_lng $ZOOM
+    $y_end = Convert-ToTileY $min_lat $ZOOM
+    
+    $x_span = $x_end - $x_start + 1
+    $y_span = $y_end - $y_start + 1
+    
+    return "$(Convert-ToBase36 $x_start 3)$(Convert-ToBase36 $y_start 3)$(Convert-ToBase36 ($x_span - 1) 3)$(Convert-ToBase36 ($y_span - 1) 3)"
 }
 
-$fileIndex = 0
+$file_index = 0
 for ($i = 0; $i -lt $PBF_FILES.Count; $i++) {
-    $fileIndex++
+    $file_index++
     $INPUT_FILE = $PBF_FILES[$i]
     $POLY_FILE = $POLY_FILES[$i]
     $ORIGINAL_NAME = $ORIGINAL_NAMES[$i]
-    $fileName = Split-Path -Leaf $INPUT_FILE
+    $file_name = Split-Path $INPUT_FILE -Leaf
     
     # Extract country code from original filename (first 2 characters)
     $COUNTRY_CODE = $ORIGINAL_NAME.Substring(0, 2)
     
     Write-Host "=========================================="
-    Write-Host "Processing [$fileIndex/$($PBF_FILES.Count)]"
-    Write-Host "  PBF File:      $fileName"
-    Write-Host "  Poly File:     $(Split-Path -Leaf $POLY_FILE)"
+    Write-Host "Processing [$file_index/$($PBF_FILES.Count)]"
+    Write-Host "  PBF File:      $file_name"
+    Write-Host "  Poly File:     $(Split-Path $POLY_FILE -Leaf)"
     Write-Host "  Original Name: $ORIGINAL_NAME"
     Write-Host "  Country Code:  $COUNTRY_CODE"
     Write-Host "=========================================="
     
-    $OUTPUT_FILE = Join-Path $OUTPUT_DIR "out_$fileIndex.map"
+    $OUTPUT_FILE = Join-Path $OUTPUT_DIR "out_$file_index.map"
     
     Write-Host "Running osmosis..."
-    $OSMOSIS_CMD = Join-Path $OSMOSIS_DIR "bin\osmosis-with-mapsforge.bat"
-    & cmd /c "`"$OSMOSIS_CMD`" --rbf file=`"$INPUT_FILE`" --bounding-polygon file=`"$POLY_FILE`" --tag-filter reject-ways amenity=* highway=* building=* natural=* landuse=* leisure=* shop=* waterway=* man_made=* railway=* tourism=* barrier=* boundary=* power=* historic=* emergency=* office=* craft=* healthcare=* aeroway=* route=* public_transport=* bridge=* tunnel=* addr:housenumber=* addr:street=* addr:city=* addr:postcode=* name=* ref=* surface=* access=* foot=* bicycle=* motor_vehicle=* oneway=* lit=* width=* maxspeed=* mountain_pass=* religion=* tracktype=* area=* sport=* piste=* admin_level=* aerialway=* lock=* roof=* military=* wood=* --tag-filter accept-relations natural=water place=islet --used-node --rbf file=`"$INPUT_FILE`" --bounding-polygon file=`"$POLY_FILE`" --tag-filter accept-ways highway=* waterway=* landuse=* natural=* place=* --tag-filter accept-relations highway=* waterway=* landuse=* natural=* place=* --used-node --merge --mapfile-writer file=`"$OUTPUT_FILE`" type=hd zoom-interval-conf=13,13,13,14,14,14 threads=$THREADS tag-conf-file=`"$TAG_CONF_FILE`""
+    & $OSMOSIS_WRAPPER `
+        --rbf "file=$INPUT_FILE" `
+        --bounding-polygon "file=$POLY_FILE" `
+        --tag-filter reject-ways amenity=* highway=* building=* natural=* landuse=* leisure=* shop=* waterway=* man_made=* railway=* tourism=* barrier=* boundary=* power=* historic=* emergency=* office=* craft=* healthcare=* aeroway=* route=* public_transport=* bridge=* tunnel=* addr:housenumber=* addr:street=* addr:city=* addr:postcode=* name=* ref=* surface=* access=* foot=* bicycle=* motor_vehicle=* oneway=* lit=* width=* maxspeed=* mountain_pass=* religion=* tracktype=* area=* sport=* piste=* admin_level=* aerialway=* lock=* roof=* military=* wood=* `
+        --tag-filter accept-relations natural=water place=islet `
+        --used-node `
+        --rbf "file=$INPUT_FILE" `
+        --bounding-polygon "file=$POLY_FILE" `
+        --tag-filter accept-ways highway=* waterway=* landuse=* natural=* place=* `
+        --tag-filter accept-relations highway=* waterway=* landuse=* natural=* place=* `
+        --used-node `
+        --merge `
+        --mapfile-writer "file=$OUTPUT_FILE" type=hd zoom-interval-conf=13,13,13,14,14,14 threads=$THREADS tag-conf-file="$TAG_CONF_FILE"
     
     if (-not (Test-Path $OUTPUT_FILE)) {
-        Write-Warning "WARNING: Osmosis did not generate file for: $fileName - skipping"
+        Write-Warning "Osmosis did not generate file for: $file_name - skipping"
         continue
     }
     
     Write-Host "Osmosis completed. Generating name..."
     
-    $fs = [System.IO.File]::OpenRead($OUTPUT_FILE)
-    $reader = New-Object System.IO.BinaryReader($fs)
     try {
+        $stream = [System.IO.File]::OpenRead($OUTPUT_FILE)
+        $reader = New-Object System.IO.BinaryReader($stream)
+        
         # Read magic string
-        $magicBytes = $reader.ReadBytes($MagicString.Length)
+        $magicBytes = $reader.ReadBytes($MAGIC_STRING.Length)
         $magic = [System.Text.Encoding]::ASCII.GetString($magicBytes)
         
-        if ($magic -ne $MagicString) {
-            Write-Warning "WARNING: Invalid .map file for: $fileName - skipping"
+        if ($magic -ne $MAGIC_STRING) {
+            Write-Warning "Invalid .map file for: $file_name - skipping"
             continue
         }
         
         # Skip 16 bytes (4 + 4 + 8)
-        $null = $reader.ReadBytes(16)
+        $reader.ReadBytes(16) | Out-Null
         
         # Read date timestamp (8 bytes, big-endian long)
-        $dateTimestamp = Read-BigEndianLong -reader $reader
-        $dateOfCreation = [DateTimeOffset]::FromUnixTimeMilliseconds($dateTimestamp).DateTime
-        $dateString = $dateOfCreation.ToString("yyMMdd")
+        $date_timestamp = Read-BigEndianInt64 $reader
+        
+        # Convert milliseconds to DateTime
+        $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
+        $date = $epoch.AddMilliseconds($date_timestamp)
+        $date_string = $date.ToString("yyMMdd")
         
         # Read bounding box (4 int32s)
-        $minLatMicro = Read-BigEndianInt32 $reader
-        $minLngMicro = Read-BigEndianInt32 $reader
-        $maxLatMicro = Read-BigEndianInt32 $reader
-        $maxLngMicro = Read-BigEndianInt32 $reader
+        $min_lat_micro = Read-BigEndianInt32 $reader
+        $min_lng_micro = Read-BigEndianInt32 $reader
+        $max_lat_micro = Read-BigEndianInt32 $reader
+        $max_lng_micro = Read-BigEndianInt32 $reader
         
-        $minLat = $minLatMicro / 1000000.0
-        $minLng = $minLngMicro / 1000000.0
-        $maxLat = $maxLatMicro / 1000000.0
-        $maxLng = $maxLngMicro / 1000000.0
+        $min_lat = $min_lat_micro / 1000000.0
+        $min_lng = $min_lng_micro / 1000000.0
+        $max_lat = $max_lat_micro / 1000000.0
+        $max_lng = $max_lng_micro / 1000000.0
         
-        $geoName = Get-GeoName -minLng $minLng -maxLng $maxLng -minLat $minLat -maxLat $maxLat
+        $geo_name = Get-GeoName $min_lng $max_lng $min_lat $max_lat
         
-        $newName = "${COUNTRY_CODE}${PRODUCT_CODE}${dateString}${geoName}"
-        $newPath = Join-Path $OUTPUT_DIR "$newName.map"
+        $new_name = "${COUNTRY_CODE}${PRODUCT_CODE}${date_string}${geo_name}"
+        $new_path = Join-Path $OUTPUT_DIR "$new_name.map"
         
         Write-Host "Map Details:"
-        Write-Host "  Date:        $dateString"
-        Write-Host "  Bounding Box: minLat=$minLat minLng=$minLng maxLat=$maxLat maxLng=$maxLng"
-        Write-Host "  Geo Code:    $geoName"
-        Write-Host "  Generated:   $newName.map"
+        Write-Host "  Date:        $date_string"
+        Write-Host "  Bounding Box: minLat=$min_lat minLng=$min_lng maxLat=$max_lat maxLng=$max_lng"
+        Write-Host "  Geo Code:    $geo_name"
+        Write-Host "  Generated:   $new_name.map"
         
-        if (Test-Path $newPath) {
-            Remove-Item $newPath -Force
+        $reader.Close()
+        $stream.Close()
+        
+        if (Test-Path $new_path) {
+            Remove-Item $new_path -Force
         }
         
-        Move-Item -Path $OUTPUT_FILE -Destination $newPath
+        Move-Item $OUTPUT_FILE $new_path
         
         Write-Host ""
     }
-    finally {
-        $reader.Close()
-        $fs.Close()
+    catch {
+        Write-Warning "Error processing file: $_"
+        if ($reader) { $reader.Close() }
+        if ($stream) { $stream.Close() }
     }
 }
 
