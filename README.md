@@ -248,14 +248,9 @@ Visit the [Cruiser Wiki page](https://wiki.openstreetmap.org/wiki/Cruiser) for d
 
 Below is a comparison showing the difference between the original IGPSPORT map (left) and the enhanced map (right) with additional features and details:
 
-![Map Comparison - Original vs Enhanced](misc/map-comparison.jpg)
+![Map Comparison - Original vs Enhanced](misc/compare-2023-to-2026.jpg)
 
-*Left: Original map with 20 basic tags | Right: Enhanced map with 37+ highway types, waterways, and natural features*
-
-### Other Compatible Viewers
-- **Oruxmaps** (Android)
-- **Locus Map** (Android)
-- **c:geo** (Android)
+*Left: Original map (2023) with 20 basic tags | Right: Enhanced map (2026) with 37+ highway types, waterways, and natural features*
 
 ## Troubleshooting
 
