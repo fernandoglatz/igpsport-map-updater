@@ -49,7 +49,7 @@ if (-not (Test-Path $OSMOSIS_WRAPPER)) {
 }
 
 $TAG_CONF_FILE = Join-Path $SCRIPT_DIR "tag-igpsport.xml"
-$THREADS = 1
+$THREADS = 4
 $TMP_DIR = Join-Path $SCRIPT_DIR "tmp"
 $env:JAVA_OPTS = "-Xms1g -Xmx8g -Djava.io.tmpdir=$TMP_DIR"
 $env:CLASSPATH = "$MAPSFORGE_WRITER_JAR;$env:CLASSPATH"
@@ -78,9 +78,9 @@ $ORIGINAL_NAMES = @()
 $csv = Import-Csv $CSV_FILE
 
 foreach ($row in $csv) {
-    $original_name = $row.original_name
-    $pbf_url = $row.pbf_url
-    $poly_url = $row.poly_url
+    $original_name = $row.'Original filename'
+    $pbf_url = $row.'OSM BPF URL'
+    $poly_url = $row.'Poly URL'
     
     if ([string]::IsNullOrWhiteSpace($original_name)) {
         continue
@@ -129,8 +129,6 @@ Write-Host "Found $($PBF_FILES.Count) entries to process"
 Write-Host "=========================================="
 Write-Host ""
 
-$PRODUCT_CODE = "2300"
-
 if (-not (Test-Path $TAG_CONF_FILE)) {
     Write-Error "ERROR: Tag configuration file not found: $TAG_CONF_FILE"
     exit 1
@@ -149,12 +147,8 @@ function Read-BigEndianInt32 {
         throw "EOF while reading int32"
     }
     
-    $value = [uint32](($bytes[0] -shl 24) -bor ($bytes[1] -shl 16) -bor ($bytes[2] -shl 8) -bor $bytes[3])
-    
-    if ($value -ge 2147483648) {
-        return [int32]($value - 4294967296)
-    }
-    return [int32]$value
+    [Array]::Reverse($bytes)
+    return [BitConverter]::ToInt32($bytes, 0)
 }
 
 function Read-BigEndianInt64 {
@@ -165,12 +159,8 @@ function Read-BigEndianInt64 {
         throw "EOF while reading int64"
     }
     
-    $value = [uint64]0
-    for ($i = 0; $i -lt 8; $i++) {
-        $value = ($value -shl 8) -bor $bytes[$i]
-    }
-    
-    return [int64]$value
+    [Array]::Reverse($bytes)
+    return [BitConverter]::ToInt64($bytes, 0)
 }
 
 function Convert-ToBase36 {
@@ -227,29 +217,24 @@ for ($i = 0; $i -lt $PBF_FILES.Count; $i++) {
     # Extract country code from original filename (first 2 characters)
     $COUNTRY_CODE = $ORIGINAL_NAME.Substring(0, 2)
     
+    # Extract product code from original filename (characters 2-5, 0-indexed)
+    $PRODUCT_CODE = $ORIGINAL_NAME.Substring(2, 4)
+    
     Write-Host "=========================================="
     Write-Host "Processing [$file_index/$($PBF_FILES.Count)]"
     Write-Host "  PBF File:      $file_name"
     Write-Host "  Poly File:     $(Split-Path $POLY_FILE -Leaf)"
     Write-Host "  Original Name: $ORIGINAL_NAME"
     Write-Host "  Country Code:  $COUNTRY_CODE"
+    Write-Host "  Product Code:  $PRODUCT_CODE"
     Write-Host "=========================================="
     
     $OUTPUT_FILE = Join-Path $OUTPUT_DIR "out_$file_index.map"
     
     Write-Host "Running osmosis..."
     & $OSMOSIS_WRAPPER `
-        --rbf "file=$INPUT_FILE" `
+        --read-pbf-fast "file=$INPUT_FILE" `
         --bounding-polygon "file=$POLY_FILE" `
-        --tag-filter reject-ways amenity=* highway=* building=* natural=* landuse=* leisure=* shop=* waterway=* man_made=* railway=* tourism=* barrier=* boundary=* power=* historic=* emergency=* office=* craft=* healthcare=* aeroway=* route=* public_transport=* bridge=* tunnel=* addr:housenumber=* addr:street=* addr:city=* addr:postcode=* name=* ref=* surface=* access=* foot=* bicycle=* motor_vehicle=* oneway=* lit=* width=* maxspeed=* mountain_pass=* religion=* tracktype=* area=* sport=* piste=* admin_level=* aerialway=* lock=* roof=* military=* wood=* `
-        --tag-filter accept-relations natural=water place=islet `
-        --used-node `
-        --rbf "file=$INPUT_FILE" `
-        --bounding-polygon "file=$POLY_FILE" `
-        --tag-filter accept-ways highway=* waterway=* landuse=* natural=* place=* `
-        --tag-filter accept-relations highway=* waterway=* landuse=* natural=* place=* `
-        --used-node `
-        --merge `
         --mapfile-writer "file=$OUTPUT_FILE" type=hd zoom-interval-conf=13,13,13,14,14,14 threads=$THREADS tag-conf-file="$TAG_CONF_FILE"
     
     if (-not (Test-Path $OUTPUT_FILE)) {

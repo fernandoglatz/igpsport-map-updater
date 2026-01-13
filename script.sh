@@ -56,7 +56,7 @@ if [ ! -f "$OSMOSIS_WRAPPER" ]; then
 fi
 
 TAG_CONF_FILE="$SCRIPT_DIR/tag-igpsport.xml"
-THREADS=1
+THREADS=4
 TMP_DIR="$SCRIPT_DIR/tmp"
 export JAVA_OPTS="-Xms1g -Xmx8g -Djava.io.tmpdir=$TMP_DIR"
 export CLASSPATH="$OSMOSIS_DIR/lib/mapsforge-map-writer-${MAPSFORGE_WRITER_VERSION}-jar-with-dependencies.jar:$CLASSPATH"
@@ -139,8 +139,6 @@ echo "=========================================="
 echo "Found ${#PBF_FILES[@]} entries to process"
 echo "=========================================="
 echo ""
-
-PRODUCT_CODE="2300"
 
 if [ ! -f "$TAG_CONF_FILE" ]; then
     echo "ERROR: Tag configuration file not found: $TAG_CONF_FILE" >&2
@@ -246,29 +244,24 @@ for i in "${!PBF_FILES[@]}"; do
     # Extract country code from original filename (first 2 characters)
     COUNTRY_CODE="${ORIGINAL_NAME:0:2}"
     
+    # Extract product code from original filename (characters 2-5, 0-indexed)
+    PRODUCT_CODE="${ORIGINAL_NAME:2:4}"
+    
     echo "=========================================="
     echo "Processing [$file_index/${#PBF_FILES[@]}]"
     echo "  PBF File:      $file_name"
     echo "  Poly File:     $(basename "$POLY_FILE")"
     echo "  Original Name: $ORIGINAL_NAME"
     echo "  Country Code:  $COUNTRY_CODE"
+    echo "  Product Code:  $PRODUCT_CODE"
     echo "=========================================="
     
     OUTPUT_FILE="$OUTPUT_DIR/out_$file_index.map"
     
     echo "Running osmosis..."
     "$OSMOSIS_DIR/bin/osmosis-with-mapsforge" \
-        --rbf file="$INPUT_FILE" \
+        --read-pbf-fast file="$INPUT_FILE" \
         --bounding-polygon file="$POLY_FILE" \
-        --tag-filter reject-ways amenity=* highway=* building=* natural=* landuse=* leisure=* shop=* waterway=* man_made=* railway=* tourism=* barrier=* boundary=* power=* historic=* emergency=* office=* craft=* healthcare=* aeroway=* route=* public_transport=* bridge=* tunnel=* addr:housenumber=* addr:street=* addr:city=* addr:postcode=* name=* ref=* surface=* access=* foot=* bicycle=* motor_vehicle=* oneway=* lit=* width=* maxspeed=* mountain_pass=* religion=* tracktype=* area=* sport=* piste=* admin_level=* aerialway=* lock=* roof=* military=* wood=* \
-        --tag-filter accept-relations natural=water place=islet \
-        --used-node \
-        --rbf file="$INPUT_FILE" \
-        --bounding-polygon file="$POLY_FILE" \
-        --tag-filter accept-ways highway=* waterway=* landuse=* natural=* place=* \
-        --tag-filter accept-relations highway=* waterway=* landuse=* natural=* place=* \
-        --used-node \
-        --merge \
         --mapfile-writer file="$OUTPUT_FILE" type=hd zoom-interval-conf=13,13,13,14,14,14 threads=$THREADS tag-conf-file="$TAG_CONF_FILE"
     
     if [ ! -f "$OUTPUT_FILE" ]; then
