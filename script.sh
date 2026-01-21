@@ -156,41 +156,139 @@ DEFAULT_ZOOM=13
 ZOOM=$((1 << DEFAULT_ZOOM))
 BASE36_CHARS="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-read_big_endian_long() {
-    local bytes=""
-    for i in {1..8}; do
-        IFS= read -r -n1 byte
-        printf -v byte_val '%d' "'$byte"
-        bytes="$bytes $byte_val"
-    done
+# Function to extract date from PBF file
+# Uses osmium if available, otherwise falls back to file modification date
+extract_pbf_date() {
+    local pbf_file="$1"
+    local date_string=""
     
-    local result=0
-    for b in $bytes; do
-        result=$(( (result << 8) + b ))
-    done
-    echo "$result"
-}
-
-read_big_endian_int32() {
-    local bytes=""
-    for i in {1..4}; do
-        IFS= read -r -n1 byte
-        if [ -z "$byte" ]; then
-            echo "ERROR: EOF while reading int32" >&2
-            return 1
+    # Try using osmium fileinfo first (most accurate)
+    if command -v osmium &> /dev/null; then
+        local timestamp=$(osmium fileinfo -g header.option.osmosis_replication_timestamp "$pbf_file" 2>/dev/null)
+        if [ -n "$timestamp" ]; then
+            # Parse ISO 8601 timestamp (e.g., 2024-01-15T20:21:53Z)
+            date_string=$(date -d "$timestamp" "+%y%m%d" 2>/dev/null)
         fi
-        printf -v byte_val '%d' "'$byte"
-        bytes="$bytes $byte_val"
-    done
-    
-    local arr=($bytes)
-    local u=$(( (${arr[0]} << 24) | (${arr[1]} << 16) | (${arr[2]} << 8) | ${arr[3]} ))
-    
-    if [ $u -ge 2147483648 ]; then
-        echo $(( u - 4294967296 ))
-    else
-        echo $u
     fi
+    
+    # Fallback: try to extract timestamp from PBF header using Python
+    if [ -z "$date_string" ] && command -v python3 &> /dev/null; then
+        date_string=$(python3 -c "
+import struct
+import gzip
+import sys
+from datetime import datetime
+
+def read_varint(data, pos):
+    result = 0
+    shift = 0
+    while True:
+        if pos >= len(data):
+            return None, pos
+        b = data[pos]
+        pos += 1
+        result |= (b & 0x7f) << shift
+        if (b & 0x80) == 0:
+            break
+        shift += 7
+    return result, pos
+
+def parse_pbf_header(filename):
+    with open(filename, 'rb') as f:
+        # Read first blob header length (4 bytes big-endian)
+        header_len_bytes = f.read(4)
+        if len(header_len_bytes) < 4:
+            return None
+        header_len = struct.unpack('>I', header_len_bytes)[0]
+        
+        # Read blob header
+        blob_header = f.read(header_len)
+        
+        # Parse blob header to get datasize
+        pos = 0
+        datasize = 0
+        while pos < len(blob_header):
+            tag_wire, pos = read_varint(blob_header, pos)
+            if tag_wire is None:
+                break
+            field = tag_wire >> 3
+            wire_type = tag_wire & 0x7
+            
+            if wire_type == 0:  # varint
+                val, pos = read_varint(blob_header, pos)
+                if field == 3:  # datasize
+                    datasize = val
+            elif wire_type == 2:  # length-delimited
+                length, pos = read_varint(blob_header, pos)
+                pos += length
+        
+        # Read blob data
+        blob_data = f.read(datasize)
+        
+        # Parse blob to find zlib_data or raw data
+        pos = 0
+        raw_data = None
+        zlib_data = None
+        while pos < len(blob_data):
+            tag_wire, pos = read_varint(blob_data, pos)
+            if tag_wire is None:
+                break
+            field = tag_wire >> 3
+            wire_type = tag_wire & 0x7
+            
+            if wire_type == 0:
+                val, pos = read_varint(blob_data, pos)
+            elif wire_type == 2:
+                length, pos = read_varint(blob_data, pos)
+                if field == 1:  # raw
+                    raw_data = blob_data[pos:pos+length]
+                elif field == 3:  # zlib_data
+                    zlib_data = blob_data[pos:pos+length]
+                pos += length
+        
+        # Decompress if needed
+        import zlib
+        if zlib_data:
+            header_block = zlib.decompress(zlib_data)
+        elif raw_data:
+            header_block = raw_data
+        else:
+            return None
+        
+        # Parse HeaderBlock for osmosis_replication_timestamp
+        pos = 0
+        while pos < len(header_block):
+            tag_wire, pos = read_varint(header_block, pos)
+            if tag_wire is None:
+                break
+            field = tag_wire >> 3
+            wire_type = tag_wire & 0x7
+            
+            if wire_type == 0:
+                val, pos = read_varint(header_block, pos)
+                if field == 32:  # osmosis_replication_timestamp (seconds since epoch)
+                    return datetime.utcfromtimestamp(val).strftime('%y%m%d')
+            elif wire_type == 2:
+                length, pos = read_varint(header_block, pos)
+                pos += length
+    
+    return None
+
+try:
+    result = parse_pbf_header('$pbf_file')
+    if result:
+        print(result)
+except Exception as e:
+    pass
+" 2>/dev/null)
+    fi
+    
+    # Final fallback: use file modification date
+    if [ -z "$date_string" ]; then
+        date_string=$(date -r "$pbf_file" "+%y%m%d" 2>/dev/null || stat -c %y "$pbf_file" 2>/dev/null | cut -d' ' -f1 | sed 's/-//g' | cut -c3-8)
+    fi
+    
+    echo "$date_string"
 }
 
 convert_to_base36() {
@@ -253,6 +351,10 @@ for i in "${!PBF_FILES[@]}"; do
     # Extract product code from original filename (characters 2-5, 0-indexed)
     PRODUCT_CODE="${ORIGINAL_NAME:2:4}"
     
+    # Extract date from PBF file before processing
+    echo "Extracting date from PBF file..."
+    date_string=$(extract_pbf_date "$INPUT_FILE")
+    
     echo "=========================================="
     echo "Processing [$file_index/${#PBF_FILES[@]}]"
     echo "  PBF File:      $file_name"
@@ -260,6 +362,7 @@ for i in "${!PBF_FILES[@]}"; do
     echo "  Original Name: $ORIGINAL_NAME"
     echo "  Country Code:  $COUNTRY_CODE"
     echo "  Product Code:  $PRODUCT_CODE"
+    echo "  PBF Date:      $date_string"
     echo "=========================================="
     
     OUTPUT_FILE="$OUTPUT_DIR/out_$file_index.map"
@@ -287,25 +390,8 @@ for i in "${!PBF_FILES[@]}"; do
             continue
         fi
         
-        # Skip 16 bytes (4 + 4 + 8)
-        dd bs=1 count=16 2>/dev/null >/dev/null
-        
-        # Read date timestamp (8 bytes, big-endian long)
-        date_bytes=""
-        for i in {1..8}; do
-            byte=$(dd bs=1 count=1 2>/dev/null | od -An -td1 | tr -d ' ')
-            if [ -z "$byte" ]; then byte=0; fi
-            date_bytes="$date_bytes $byte"
-        done
-        
-        date_timestamp=0
-        for b in $date_bytes; do
-            date_timestamp=$(( (date_timestamp << 8) + (b < 0 ? b + 256 : b) ))
-        done
-        
-        # Convert milliseconds to seconds for date command
-        date_seconds=$((date_timestamp / 1000))
-        date_string=$(date -d "@$date_seconds" "+%y%m%d")
+        # Skip 24 bytes to reach bounding box (4 + 4 + 8 for header + 8 for date timestamp)
+        dd bs=1 count=24 2>/dev/null >/dev/null
         
         # Read bounding box (4 int32s)
         read_int32() {
@@ -348,7 +434,7 @@ for i in "${!PBF_FILES[@]}"; do
         new_path="$OUTPUT_DIR/$new_name.map"
         
         echo "Map Details:"
-        echo "  Date:        $date_string"
+        echo "  Date (from PBF): $date_string"
         echo "  Bounding Box: minLat=$min_lat minLng=$min_lng maxLat=$max_lat maxLng=$max_lng"
         echo "  Geo Code:    $geo_name"
         echo "  Generated:   $new_name.map"

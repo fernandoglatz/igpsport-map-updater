@@ -145,6 +145,148 @@ $DEFAULT_ZOOM = 13
 $ZOOM = [math]::Pow(2, $DEFAULT_ZOOM)
 $BASE36_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+# Function to read a varint from byte array
+function Read-Varint {
+    param([byte[]]$data, [ref]$pos)
+    
+    $result = [uint64]0
+    $shift = 0
+    while ($pos.Value -lt $data.Length) {
+        $b = $data[$pos.Value]
+        $pos.Value++
+        $result = $result -bor (([uint64]($b -band 0x7f)) -shl $shift)
+        if (($b -band 0x80) -eq 0) {
+            break
+        }
+        $shift += 7
+    }
+    return $result
+}
+
+# Function to extract date from PBF file header
+function Get-PbfDate {
+    param([string]$pbfFile)
+    
+    try {
+        $stream = [System.IO.File]::OpenRead($pbfFile)
+        $reader = New-Object System.IO.BinaryReader($stream)
+        
+        # Read first blob header length (4 bytes big-endian)
+        $headerLenBytes = $reader.ReadBytes(4)
+        [Array]::Reverse($headerLenBytes)
+        $headerLen = [BitConverter]::ToInt32($headerLenBytes, 0)
+        
+        # Read blob header
+        $blobHeader = $reader.ReadBytes($headerLen)
+        
+        # Parse blob header to get datasize
+        $pos = [ref]0
+        $datasize = 0
+        while ($pos.Value -lt $blobHeader.Length) {
+            $tagWire = Read-Varint $blobHeader $pos
+            $field = $tagWire -shr 3
+            $wireType = $tagWire -band 0x7
+            
+            if ($wireType -eq 0) {  # varint
+                $val = Read-Varint $blobHeader $pos
+                if ($field -eq 3) {  # datasize
+                    $datasize = $val
+                }
+            }
+            elseif ($wireType -eq 2) {  # length-delimited
+                $length = Read-Varint $blobHeader $pos
+                $pos.Value += $length
+            }
+        }
+        
+        # Read blob data
+        $blobData = $reader.ReadBytes($datasize)
+        
+        # Parse blob to find zlib_data
+        $pos.Value = 0
+        $zlibData = $null
+        $rawData = $null
+        while ($pos.Value -lt $blobData.Length) {
+            $tagWire = Read-Varint $blobData $pos
+            $field = $tagWire -shr 3
+            $wireType = $tagWire -band 0x7
+            
+            if ($wireType -eq 0) {
+                $val = Read-Varint $blobData $pos
+            }
+            elseif ($wireType -eq 2) {
+                $length = Read-Varint $blobData $pos
+                if ($field -eq 1) {  # raw
+                    $rawData = New-Object byte[] $length
+                    [Array]::Copy($blobData, $pos.Value, $rawData, 0, $length)
+                }
+                elseif ($field -eq 3) {  # zlib_data
+                    $zlibData = New-Object byte[] $length
+                    [Array]::Copy($blobData, $pos.Value, $zlibData, 0, $length)
+                }
+                $pos.Value += $length
+            }
+        }
+        
+        # Decompress if needed
+        $headerBlock = $null
+        if ($zlibData) {
+            # Skip first 2 bytes (zlib header) and decompress
+            $compressedStream = New-Object System.IO.MemoryStream(,$zlibData)
+            $compressedStream.Position = 2  # Skip zlib header
+            $deflateStream = New-Object System.IO.Compression.DeflateStream($compressedStream, [System.IO.Compression.CompressionMode]::Decompress)
+            $outputStream = New-Object System.IO.MemoryStream
+            $deflateStream.CopyTo($outputStream)
+            $headerBlock = $outputStream.ToArray()
+            $deflateStream.Close()
+            $outputStream.Close()
+            $compressedStream.Close()
+        }
+        elseif ($rawData) {
+            $headerBlock = $rawData
+        }
+        
+        if (-not $headerBlock) {
+            $reader.Close()
+            $stream.Close()
+            return $null
+        }
+        
+        # Parse HeaderBlock for osmosis_replication_timestamp
+        $pos.Value = 0
+        while ($pos.Value -lt $headerBlock.Length) {
+            $tagWire = Read-Varint $headerBlock $pos
+            $field = $tagWire -shr 3
+            $wireType = $tagWire -band 0x7
+            
+            if ($wireType -eq 0) {  # varint
+                $val = Read-Varint $headerBlock $pos
+                if ($field -eq 32) {  # osmosis_replication_timestamp (seconds since epoch)
+                    $reader.Close()
+                    $stream.Close()
+                    $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
+                    $date = $epoch.AddSeconds($val)
+                    return $date.ToString("yyMMdd")
+                }
+            }
+            elseif ($wireType -eq 2) {  # length-delimited
+                $length = Read-Varint $headerBlock $pos
+                $pos.Value += $length
+            }
+        }
+        
+        $reader.Close()
+        $stream.Close()
+    }
+    catch {
+        Write-Warning "Error reading PBF header: $_"
+    }
+    
+    # Fallback: use file modification date
+    $fileInfo = Get-Item $pbfFile
+    return $fileInfo.LastWriteTime.ToString("yyMMdd")
+}
+
 function Read-BigEndianInt32 {
     param([System.IO.BinaryReader]$reader)
     
@@ -155,18 +297,6 @@ function Read-BigEndianInt32 {
     
     [Array]::Reverse($bytes)
     return [BitConverter]::ToInt32($bytes, 0)
-}
-
-function Read-BigEndianInt64 {
-    param([System.IO.BinaryReader]$reader)
-    
-    $bytes = $reader.ReadBytes(8)
-    if ($bytes.Length -lt 8) {
-        throw "EOF while reading int64"
-    }
-    
-    [Array]::Reverse($bytes)
-    return [BitConverter]::ToInt64($bytes, 0)
 }
 
 function Convert-ToBase36 {
@@ -226,6 +356,10 @@ for ($i = 0; $i -lt $PBF_FILES.Count; $i++) {
     # Extract product code from original filename (characters 2-5, 0-indexed)
     $PRODUCT_CODE = $ORIGINAL_NAME.Substring(2, 4)
     
+    # Extract date from PBF file before processing
+    Write-Host "Extracting date from PBF file..."
+    $date_string = Get-PbfDate $INPUT_FILE
+    
     Write-Host "=========================================="
     Write-Host "Processing [$file_index/$($PBF_FILES.Count)]"
     Write-Host "  PBF File:      $file_name"
@@ -233,6 +367,7 @@ for ($i = 0; $i -lt $PBF_FILES.Count; $i++) {
     Write-Host "  Original Name: $ORIGINAL_NAME"
     Write-Host "  Country Code:  $COUNTRY_CODE"
     Write-Host "  Product Code:  $PRODUCT_CODE"
+    Write-Host "  PBF Date:      $date_string"
     Write-Host "=========================================="
     
     $OUTPUT_FILE = Join-Path $OUTPUT_DIR "out_$file_index.map"
@@ -264,16 +399,8 @@ for ($i = 0; $i -lt $PBF_FILES.Count; $i++) {
             continue
         }
         
-        # Skip 16 bytes (4 + 4 + 8)
-        $reader.ReadBytes(16) | Out-Null
-        
-        # Read date timestamp (8 bytes, big-endian long)
-        $date_timestamp = Read-BigEndianInt64 $reader
-        
-        # Convert milliseconds to DateTime
-        $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
-        $date = $epoch.AddMilliseconds($date_timestamp)
-        $date_string = $date.ToString("yyMMdd")
+        # Skip 24 bytes to reach bounding box (4 + 4 + 8 for header + 8 for date timestamp)
+        $reader.ReadBytes(24) | Out-Null
         
         # Read bounding box (4 int32s)
         $min_lat_micro = Read-BigEndianInt32 $reader
@@ -292,7 +419,7 @@ for ($i = 0; $i -lt $PBF_FILES.Count; $i++) {
         $new_path = Join-Path $OUTPUT_DIR "$new_name.map"
         
         Write-Host "Map Details:"
-        Write-Host "  Date:        $date_string"
+        Write-Host "  Date (from PBF): $date_string"
         Write-Host "  Bounding Box: minLat=$min_lat minLng=$min_lng maxLat=$max_lat maxLng=$max_lng"
         Write-Host "  Geo Code:    $geo_name"
         Write-Host "  Generated:   $new_name.map"
