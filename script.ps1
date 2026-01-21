@@ -49,6 +49,7 @@ if (-not (Test-Path $OSMOSIS_WRAPPER)) {
 }
 
 $TAG_CONF_FILE = Join-Path $SCRIPT_DIR "tag-igpsport.xml"
+$TAG_TRANSFORM_FILE = Join-Path $SCRIPT_DIR "tag-igpsport-transform.xml"
 $THREADS = 4
 $TMP_DIR = Join-Path $SCRIPT_DIR "tmp"
 $env:JAVA_OPTS = "-Xms1g -Xmx8g -Djava.io.tmpdir=$TMP_DIR"
@@ -131,6 +132,11 @@ Write-Host ""
 
 if (-not (Test-Path $TAG_CONF_FILE)) {
     Write-Error "ERROR: Tag configuration file not found: $TAG_CONF_FILE"
+    exit 1
+}
+
+if (-not (Test-Path $TAG_TRANSFORM_FILE)) {
+    Write-Error "ERROR: Tag transform file not found: $TAG_TRANSFORM_FILE"
     exit 1
 }
 
@@ -235,6 +241,7 @@ for ($i = 0; $i -lt $PBF_FILES.Count; $i++) {
     & $OSMOSIS_WRAPPER `
         --read-pbf-fast "file=$INPUT_FILE" `
         --bounding-polygon "file=$POLY_FILE" `
+        --tag-transform "file=$TAG_TRANSFORM_FILE" `
         --mapfile-writer "file=$OUTPUT_FILE" type=hd zoom-interval-conf=13,13,13,14,14,14 threads=$THREADS tag-conf-file="$TAG_CONF_FILE"
     
     if (-not (Test-Path $OUTPUT_FILE)) {

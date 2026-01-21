@@ -56,6 +56,7 @@ if [ ! -f "$OSMOSIS_WRAPPER" ]; then
 fi
 
 TAG_CONF_FILE="$SCRIPT_DIR/tag-igpsport.xml"
+TAG_TRANSFORM_FILE="$SCRIPT_DIR/tag-igpsport-transform.xml"
 THREADS=4
 TMP_DIR="$SCRIPT_DIR/tmp"
 export JAVA_OPTS="-Xms1g -Xmx8g -Djava.io.tmpdir=$TMP_DIR"
@@ -142,6 +143,11 @@ echo ""
 
 if [ ! -f "$TAG_CONF_FILE" ]; then
     echo "ERROR: Tag configuration file not found: $TAG_CONF_FILE" >&2
+    exit 1
+fi
+
+if [ ! -f "$TAG_TRANSFORM_FILE" ]; then
+    echo "ERROR: Tag transform file not found: $TAG_TRANSFORM_FILE" >&2
     exit 1
 fi
 
@@ -262,6 +268,7 @@ for i in "${!PBF_FILES[@]}"; do
     "$OSMOSIS_DIR/bin/osmosis-with-mapsforge" \
         --read-pbf-fast file="$INPUT_FILE" \
         --bounding-polygon file="$POLY_FILE" \
+        --tag-transform file="$TAG_TRANSFORM_FILE" \
         --mapfile-writer file="$OUTPUT_FILE" type=hd zoom-interval-conf=13,13,13,14,14,14 threads=$THREADS tag-conf-file="$TAG_CONF_FILE"
     
     if [ ! -f "$OUTPUT_FILE" ]; then
