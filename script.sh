@@ -29,12 +29,12 @@ if [ ! -d "$OSMOSIS_DIR" ]; then
 fi
 
 # Download and install Mapsforge writer plugin if not present
-MAPSFORGE_WRITER_VERSION="0.25.0"
+MAPSFORGE_WRITER_VERSION="0.27.0"
 MAPSFORGE_WRITER_JAR="$OSMOSIS_DIR/lib/mapsforge-map-writer-${MAPSFORGE_WRITER_VERSION}-jar-with-dependencies.jar"
 
 if [ ! -f "$MAPSFORGE_WRITER_JAR" ]; then
     echo "Mapsforge writer plugin not found. Downloading version $MAPSFORGE_WRITER_VERSION..."
-    MAPSFORGE_URL="https://repo1.maven.org/maven2/org/mapsforge/mapsforge-map-writer/${MAPSFORGE_WRITER_VERSION}/mapsforge-map-writer-${MAPSFORGE_WRITER_VERSION}-jar-with-dependencies.jar"
+    MAPSFORGE_URL="https://github.com/mapsforge/mapsforge/releases/download/${MAPSFORGE_WRITER_VERSION}/mapsforge-map-writer-${MAPSFORGE_WRITER_VERSION}-jar-with-dependencies.jar"
     
     curl -sL -o "$MAPSFORGE_WRITER_JAR" "$MAPSFORGE_URL"
     

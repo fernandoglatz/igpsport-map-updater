@@ -113,7 +113,7 @@ chmod +x script.sh
 ## What the Script Does
 
 1. **Downloads Osmosis** (if not present) - OpenStreetMap data processing tool (v0.49.2)
-2. **Downloads Mapsforge Writer Plugin** (v0.25.0) - Converts OSM data to Mapsforge format
+2. **Downloads Mapsforge Writer Plugin** (v0.27.0) - Converts OSM data to Mapsforge format
 3. **Reads maps.csv** - Configuration file with region definitions
 4. **Downloads OSM PBF files** - Raw OpenStreetMap data from Geofabrik
 5. **Downloads Polygon files** - Geographic boundary definitions
