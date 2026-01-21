@@ -1,6 +1,6 @@
 # IGPSPORT Map Updater
 
-A tool to generate custom map files for IGPSPORT devices from OpenStreetMap data. This project downloads OSM PBF files, filters them based on polygons, and generates Mapsforge map files with specific naming conventions for IGPSPORT GPS devices.
+A tool to generate custom map files for IGPSPORT cycling computers from OpenStreetMap data. This project downloads OSM PBF files, filters them based on polygon boundaries, transforms unsupported tags, and generates Mapsforge map files with the specific naming convention required by IGPSPORT GPS devices.
 
 ## Supported Products
 
@@ -47,51 +47,47 @@ Official support/download page: https://www.igpsport.com/en/support/product
 
 The generated maps are **larger than original IGPSPORT maps** because they include:
 - More detailed road networks
-- Additional map features (waterways, landuse, natural features)
+- Additional map features (waterways, natural features)
 - Enhanced tagging information for better routing
 - Extended geographic data
 
-### Original vs Enhanced Tags
+### Tag Configuration
 
-**Original IGPSPORT maps included only 20 basic tags:**
-```
-highway=cycleway
-highway=footway
-highway=living_street
-highway=path
-highway=pedestrian
-highway=primary
-highway=primary_link
-highway=residential
-highway=road
-highway=secondary
-highway=secondary_link
-highway=service
-highway=tertiary
-highway=tertiary_link
-highway=track
-highway=trunk
-highway=trunk_link
-highway=unclassified
-natural=coastline
-natural=water
-```
+This project uses two XML configuration files to control which OpenStreetMap tags are included in the generated maps:
 
-**Enhanced maps include many additional features:**
+#### Supported Tags ([tag-igpsport.xml](tag-igpsport.xml))
 
-**Highway types (37 types):**
-- Major roads (zoom 13): motorway, motorway_link, primary, primary_link, secondary, secondary_link, trunk, trunk_link, tertiary, tertiary_link
-- Minor roads & paths (zoom 14): bridleway, bus_guideway, byway, construction, cycleway, footway, living_street, path, pedestrian, raceway, residential, road, service, services, steps, track, unclassified
+The following **21 tags** are directly supported by IGPSPORT devices:
 
-**Natural features (zoom 13):**
-- coastline, water
+| Category | Tags | Zoom Level |
+|----------|------|------------|
+| **Major Roads** | primary, primary_link, secondary, secondary_link, trunk, trunk_link, tertiary, tertiary_link | 13 |
+| **Minor Roads** | cycleway, living_street, pedestrian, residential, road, service, track, unclassified | 14 |
+| **Natural** | coastline, water | 13 |
+| **Waterways** | canal, dam, drain, river, stream | 14 |
 
-**Waterways (zoom 14):**
-- canal, dam, drain, river, stream
+#### Tag Transformations ([tag-igpsport-transform.xml](tag-igpsport-transform.xml))
 
-See [tag-igpsport.xml](tag-igpsport.xml) for the complete tag configuration used in this project.
+The following **12 transformations** convert unsupported OSM tags to device-compatible equivalents:
 
-For a comprehensive list of all available OpenStreetMap tags that can be included in Mapsforge maps, see the [Mapsforge tag-mapping reference](https://github.com/mapsforge/mapsforge/blob/master/mapsforge-map-writer/src/main/config/tag-mapping.xml).
+| Unsupported Tag | Transformed To | Description |
+|-----------------|----------------|-------------|
+| `highway=motorway` | `highway=trunk` | Major highways |
+| `highway=motorway_link` | `highway=trunk_link` | Highway ramps |
+| `highway=footway` | `highway=cycleway` | Pedestrian paths |
+| `highway=path` | `highway=cycleway` | Generic paths |
+| `highway=bridleway` | `highway=cycleway` | Horse trails |
+| `highway=sidewalk` | `highway=cycleway` | Sidewalks |
+| `highway=steps` | `highway=pedestrian` | Stairs |
+| `highway=byway` | `highway=track` | Rural byways |
+| `highway=bus_guideway` | `highway=road` | Guided bus routes |
+| `highway=construction` | `highway=road` | Roads under construction |
+| `highway=raceway` | `highway=road` | Racing circuits |
+| `highway=services` | `highway=service` | Service areas |
+
+This means the maps effectively support **33 highway types** (21 native + 12 transformed).
+
+See the [Mapsforge tag-mapping reference](https://github.com/mapsforge/mapsforge/blob/master/mapsforge-map-writer/src/main/config/tag-mapping.xml) for all available OpenStreetMap tags.
 
 ## How to Run
 
@@ -116,13 +112,14 @@ chmod +x script.sh
 
 ## What the Script Does
 
-1. **Downloads Osmosis** (if not present) - OpenStreetMap data processing tool
-2. **Downloads Mapsforge Writer Plugin** - Converts OSM data to map format
+1. **Downloads Osmosis** (if not present) - OpenStreetMap data processing tool (v0.49.2)
+2. **Downloads Mapsforge Writer Plugin** (v0.25.0) - Converts OSM data to Mapsforge format
 3. **Reads maps.csv** - Configuration file with region definitions
-4. **Downloads OSM PBF files** - Raw OpenStreetMap data
-5. **Downloads Polygon files** - Define geographic boundaries
-6. **Processes maps** - Filters and converts data to IGPSPORT format
-7. **Generates filenames** - Creates properly formatted output files
+4. **Downloads OSM PBF files** - Raw OpenStreetMap data from Geofabrik
+5. **Downloads Polygon files** - Geographic boundary definitions
+6. **Transforms tags** - Converts unsupported OSM tags to device-compatible equivalents
+7. **Generates maps** - Creates Mapsforge `.map` files with proper zoom levels
+8. **Renames output** - Calculates GEOCODE and applies IGPSPORT filename convention
 
 ## CSV File Structure
 
@@ -151,20 +148,24 @@ BR02002303102833DN04O04Q.map,https://download.geofabrik.de/south-america/brazil-
 
 ```
 igpsport-map-updater/
-├── script.sh                # Unix/Linux/macOS execution script
-├── script.ps1               # Windows PowerShell execution script
-├── maps.csv                 # Configuration file with map definitions
-├── tag-igpsport.xml         # Tag configuration for Mapsforge writer
-├── download/                # Downloaded OSM PBF and polygon files
+├── script.sh                    # Unix/Linux/macOS execution script
+├── script.ps1                   # Windows PowerShell execution script
+├── maps.csv                     # Configuration file with map definitions
+├── tag-igpsport.xml             # Tag configuration for Mapsforge writer
+├── tag-igpsport-transform.xml   # Tag transformation rules
+├── extract_tags.py              # Utility to extract tags from .map files
+├── download/                    # Downloaded OSM PBF and polygon files
 │   ├── *.osm.pbf
 │   └── *.poly
-├── output/                  # Generated map files (final output)
+├── output/                      # Generated map files (final output)
 │   └── *.map
-├── tmp/                     # Temporary files during processing
-├── misc/                    # Documentation and diagrams
+├── backup/                      # Store original IGPSPORT maps here
+├── tmp/                         # Temporary files during processing
+├── misc/                        # Documentation and diagrams
 │   ├── filename-structure.svg
-│   └── tile-grid-concept.svg
-└── osmosis-0.49.2/          # Osmosis tool (auto-downloaded)
+│   ├── tile-grid-concept.svg
+│   └── compare-2023-to-2026.jpg
+└── osmosis-0.49.2/              # Osmosis tool (auto-downloaded)
     ├── bin/
     ├── lib/
     └── script/
@@ -174,6 +175,7 @@ igpsport-map-updater/
 
 - **download/**: Stores downloaded OSM PBF files and polygon boundary files. Files are cached to avoid re-downloading.
 - **output/**: Contains the final generated `.map` files with IGPSPORT-compatible filenames.
+- **backup/**: Recommended location to store your original IGPSPORT maps before replacing them.
 - **tmp/**: Temporary directory used by Osmosis during processing (can be deleted after completion).
 - **misc/**: Contains SVG diagrams explaining the filename structure and tile grid concepts.
 - **osmosis-0.49.2/**: Automatically downloaded and extracted Osmosis tool with Mapsforge plugin.
@@ -292,28 +294,52 @@ chmod +x script.sh
 ### Map Features Included
 
 The script filters OSM data to include:
-- **Roads**: highways, paths, tracks
-- **Waterways**: rivers, streams, canals
-- **Landuse**: forests, fields, parks
+- **Roads**: highways, paths, tracks (with tag transformation for unsupported types)
+- **Waterways**: rivers, streams, canals, dams, drains
 - **Natural features**: water bodies, coastlines
-- **Places**: cities, towns, villages
 
-All other features (buildings, POIs, etc.) are filtered out to reduce file size and focus on navigation.
+All other features (buildings, POIs, amenities, etc.) are filtered out to reduce file size and focus on navigation.
+
+## Utilities
+
+### Tag Extractor (extract_tags.py)
+
+A Python utility to extract and analyze tags from Mapsforge `.map` files. Useful for:
+- Inspecting what tags are embedded in existing maps
+- Comparing tags between different map versions
+- Debugging tag configuration issues
+
+**Usage:**
+```bash
+# Single file
+python extract_tags.py output/map.map
+
+# Single file with output
+python extract_tags.py output/map.map tags.txt
+
+# Process all files in folder
+python extract_tags.py backup/
+
+# Process folder with output
+python extract_tags.py backup/ tags_output/
+```
 
 ## License
 
-This project uses:
-- **Osmosis**: LGPL
-- **Mapsforge**: LGPL
-- **OpenStreetMap Data**: ODbL
+This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
+
+### Dependencies and Data
+- **Osmosis**: LGPL ([GitHub](https://github.com/openstreetmap/osmosis))
+- **Mapsforge**: LGPL ([GitHub](https://github.com/mapsforge/mapsforge))
+- **OpenStreetMap Data**: ODbL ([License](https://www.openstreetmap.org/copyright))
 
 ## References
 
-- [Reddit thread](https://www.reddit.com/r/cycling/comments/1khm2ou/newcustom_maps_on_igpsport_bsc300t_630s) shared by [u/povlhp](https://www.reddit.com/user/povlhp/) 
+- [Reddit thread](https://www.reddit.com/r/cycling/comments/1khm2ou/newcustom_maps_on_igpsport_bsc300t_630s) shared by [u/povlhp](https://www.reddit.com/user/povlhp/)
 - [Original project](https://github.com/tm-cms/MapsforgeMapName) by [tm-cms](https://github.com/tm-cms)
 - [OpenStreetMap](https://www.openstreetmap.org/)
-- [OpenStreetMap France](https://download.openstreetmap.fr/)
-- [Geofabrik Downloads](https://download.geofabrik.de/)
+- [OpenStreetMap France](https://download.openstreetmap.fr/) - Polygon files
+- [Geofabrik Downloads](https://download.geofabrik.de/) - OSM PBF files
 - [Osmosis Documentation](https://wiki.openstreetmap.org/wiki/Osmosis)
 - [Mapsforge](https://github.com/mapsforge/mapsforge)
 - [Cruiser Map Viewer](https://wiki.openstreetmap.org/wiki/Cruiser)
