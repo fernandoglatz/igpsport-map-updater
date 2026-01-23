@@ -252,7 +252,7 @@ Below is a comparison showing the difference between the original IGPSPORT map (
 
 ![Map Comparison - Original vs Enhanced](misc/compare-2023-to-2026.jpg)
 
-*Left: Original map (2023) with 20 basic tags | Right: Enhanced map (2026) with 37+ highway types, waterways, and natural features*
+*Left: Original map (2023) | Right: Enhanced map (2026
 
 ## Troubleshooting
 
@@ -302,7 +302,7 @@ All other features (buildings, POIs, amenities, etc.) are filtered out to reduce
 
 ## Utilities
 
-### Tag Extractor (extract_tags.py)
+### Map Tag Extractor (extract_tags_map.py)
 
 A Python utility to extract and analyze tags from Mapsforge `.map` files. Useful for:
 - Inspecting what tags are embedded in existing maps
@@ -312,17 +312,82 @@ A Python utility to extract and analyze tags from Mapsforge `.map` files. Useful
 **Usage:**
 ```bash
 # Single file
-python extract_tags.py output/map.map
+python extract_tags_map.py output/map.map
 
 # Single file with output
-python extract_tags.py output/map.map tags.txt
+python extract_tags_map.py output/map.map tags.txt
 
 # Process all files in folder
-python extract_tags.py backup/
+python extract_tags_map.py backup/
 
 # Process folder with output
-python extract_tags.py backup/ tags_output/
+python extract_tags_map.py backup/ tags_output/
 ```
+
+### PBF Tag Extractor (extract_tags_pbf.py)
+
+A Python utility to extract and analyze tags from raw OSM PBF files before processing. This tool helps you understand what tags are available in the source data and plan your tag filtering/transformation strategy.
+
+**Features:**
+- Extract tags from nodes, ways, and relations separately
+- Display tag frequency statistics
+- Export results in multiple formats (text, JSON, CSV)
+- Process individual files or entire folders
+- Filter by minimum occurrence count
+- Requires either `pyosmium` (faster) or `osmium-tool`
+
+**Installation:**
+```bash
+# Option 1: Install pyosmium (recommended - faster)
+pip install osmium
+
+# Option 2: Install osmium-tool
+# Ubuntu/Debian
+sudo apt-get install osmium-tool
+
+# Fedora
+sudo dnf install osmium-tool
+
+# macOS
+brew install osmium-tool
+```
+
+**Usage:**
+```bash
+# Single file - display tags in terminal
+python extract_tags_pbf.py download/brazil-latest.osm.pbf
+
+# Single file - export to text file
+python extract_tags_pbf.py download/sao-paulo.pbf -o tags.txt
+
+# Single file - export to JSON
+python extract_tags_pbf.py download/sao-paulo.pbf -o tags.json -f json
+
+# Single file - export to CSV
+python extract_tags_pbf.py download/sao-paulo.pbf -o tags.csv -f csv
+
+# Process all .pbf files in folder
+python extract_tags_pbf.py download/
+
+# Process folder and export each file
+python extract_tags_pbf.py download/ -o output_tags/
+
+# Process with filters
+python extract_tags_pbf.py download/ -o output/ -f json -m 10 -d 100
+```
+
+**Options:**
+- `-o, --output`: Output file or folder for extracted tags
+- `-f, --format`: Output format - `text` (default), `json`, or `csv`
+- `-m, --min-count`: Minimum occurrence count to include (default: 1)
+- `-d, --display`: Maximum tags to display in terminal (default: 50)
+
+**Use Cases:**
+- Analyze tag distribution in source OSM data
+- Identify which highway types are present in your region
+- Determine what tags need transformation for IGPSPORT compatibility
+- Compare tag usage across different regions
+- Plan custom tag filtering strategies
 
 ## License
 
