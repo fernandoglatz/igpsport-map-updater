@@ -13,7 +13,7 @@ if [ ! -d "$OSMOSIS_DIR" ]; then
     OSMOSIS_URL="https://github.com/openstreetmap/osmosis/releases/download/$OSMOSIS_VERSION/osmosis-$OSMOSIS_VERSION.zip"
     OSMOSIS_ZIP="$SCRIPT_DIR/osmosis-$OSMOSIS_VERSION.zip"
     
-    curl -sL -o "$OSMOSIS_ZIP" "$OSMOSIS_URL"
+    curl -fsL -o "$OSMOSIS_ZIP" "$OSMOSIS_URL"
     
     echo "Extracting osmosis..."
     unzip -q "$OSMOSIS_ZIP" -d "$SCRIPT_DIR"
@@ -36,7 +36,7 @@ if [ ! -f "$MAPSFORGE_WRITER_JAR" ]; then
     echo "Mapsforge writer plugin not found. Downloading version $MAPSFORGE_WRITER_VERSION..."
     MAPSFORGE_URL="https://github.com/mapsforge/mapsforge/releases/download/${MAPSFORGE_WRITER_VERSION}/mapsforge-map-writer-${MAPSFORGE_WRITER_VERSION}-jar-with-dependencies.jar"
     
-    curl -sL -o "$MAPSFORGE_WRITER_JAR" "$MAPSFORGE_URL"
+    curl -fsL -o "$MAPSFORGE_WRITER_JAR" "$MAPSFORGE_URL"
     
     echo "Mapsforge writer plugin installed successfully."
     echo ""
@@ -55,16 +55,50 @@ if [ ! -f "$OSMOSIS_WRAPPER" ]; then
     chmod +x "$OSMOSIS_WRAPPER"
 fi
 
-TAG_CONF_FILE="$SCRIPT_DIR/tag-igpsport.xml"
-TAG_TRANSFORM_FILE="$SCRIPT_DIR/tag-igpsport-transform.xml"
-THREADS=4
-TMP_DIR="$SCRIPT_DIR/tmp"
-export JAVA_OPTS="-Xms1g -Xmx8g -Djava.io.tmpdir=$TMP_DIR"
+MAP_TAG_PROFILE="${MAP_TAG_PROFILE:-enhanced}"
+MAP_TAG_PROFILE="$(echo "$MAP_TAG_PROFILE" | tr '[:upper:]' '[:lower:]')"
+case "$MAP_TAG_PROFILE" in
+    igs630|strict|compat)
+        TAG_CONF_FILE="$SCRIPT_DIR/tag-igpsport-igs630.xml"
+        TAG_TRANSFORM_FILE="$SCRIPT_DIR/tag-igpsport-igs630-transform.xml"
+        ;;
+    enhanced)
+        TAG_CONF_FILE="$SCRIPT_DIR/tag-igpsport.xml"
+        TAG_TRANSFORM_FILE="$SCRIPT_DIR/tag-igpsport-transform.xml"
+        ;;
+    *)
+        echo "ERROR: Unsupported MAP_TAG_PROFILE '$MAP_TAG_PROFILE'. Use 'enhanced' or 'igs630'." >&2
+        exit 1
+        ;;
+esac
+THREADS="${MAP_WRITER_THREADS:-}"
+MAP_WRITER_TYPE="${MAP_WRITER_TYPE:-auto}"
+MAP_ALLOW_HD_FALLBACK="${MAP_ALLOW_HD_FALLBACK:-}"
+RESUME_MODE="${MAP_RESUME:-}"
+MAP_PRECLIP_MODE="${MAP_PRECLIP_MODE:-disabled}"
+MAP_PRECLIP_MODE="$(echo "$MAP_PRECLIP_MODE" | tr '[:upper:]' '[:lower:]')"
+case "$MAP_PRECLIP_MODE" in
+    off|false|0) MAP_PRECLIP_MODE="disabled" ;;
+esac
+case "$MAP_PRECLIP_MODE" in
+    disabled|auto|required) ;;
+    *)
+        echo "ERROR: Unsupported MAP_PRECLIP_MODE '$MAP_PRECLIP_MODE'. Use 'disabled', 'auto', or 'required'." >&2
+        exit 1
+        ;;
+esac
+MAP_PRECLIP_STRATEGY="${MAP_PRECLIP_STRATEGY:-smart}"
+PRECLIP_VERSION="1"
+PRECLIP_CACHE_DIR="${MAP_PRECLIP_CACHE_DIR:-$SCRIPT_DIR/tmp/osmium-preclip}"
+TMP_DIR="${JAVA_TMP_DIR:-$SCRIPT_DIR/tmp}"
+JAVA_XMS="${JAVA_XMS:-}"
+JAVA_XMX="${JAVA_XMX:-}"
 export CLASSPATH="$OSMOSIS_DIR/lib/mapsforge-map-writer-${MAPSFORGE_WRITER_VERSION}-jar-with-dependencies.jar:$CLASSPATH"
 
 # Create directories
 DOWNLOAD_DIR="$SCRIPT_DIR/download"
 OUTPUT_DIR="$SCRIPT_DIR/output"
+INPUT_DIR="${MAP_INPUT_DIR:-}"
 
 mkdir -p "$TMP_DIR"
 mkdir -p "$DOWNLOAD_DIR"
@@ -96,36 +130,52 @@ while IFS=',' read -r original_name pbf_url poly_url; do
     if [ -z "$original_name" ]; then
         continue
     fi
-    
+
     echo ""
     echo "Processing entry: $original_name"
-    
-    # Download PBF file
-    pbf_filename=$(basename "$pbf_url")
-    pbf_path="$DOWNLOAD_DIR/$pbf_filename"
-    
-    if [ ! -f "$pbf_path" ]; then
-        echo "  Downloading PBF: $pbf_filename..."
-        curl -sL -o "$pbf_path" "$pbf_url"
-        echo "  PBF downloaded."
-    else
-        echo "  PBF already exists: $pbf_filename"
+
+    IFS=';' read -r -a pbf_urls <<< "$pbf_url"
+    IFS=';' read -r -a poly_urls <<< "$poly_url"
+
+    if [ "${#pbf_urls[@]}" -eq 0 ] || [ "${#pbf_urls[@]}" -ne "${#poly_urls[@]}" ]; then
+        echo "WARNING: Skipping invalid CSV row for $original_name (PBF/poly counts do not match)"
+        continue
     fi
-    
-    # Download Poly file
-    poly_filename=$(basename "$poly_url")
-    poly_path="$DOWNLOAD_DIR/$poly_filename"
-    
-    if [ ! -f "$poly_path" ]; then
-        echo "  Downloading Poly: $poly_filename..."
-        curl -sL -o "$poly_path" "$poly_url"
-        echo "  Poly downloaded."
-    else
-        echo "  Poly already exists: $poly_filename"
-    fi
-    
-    PBF_FILES+=("$pbf_path")
-    POLY_FILES+=("$poly_path")
+
+    pbf_paths=()
+    poly_paths=()
+    for source_index in "${!pbf_urls[@]}"; do
+        trimmed_pbf_url=$(echo "${pbf_urls[$source_index]}" | sed 's/^ *//;s/ *$//')
+        trimmed_poly_url=$(echo "${poly_urls[$source_index]}" | sed 's/^ *//;s/ *$//')
+
+        pbf_filename=$(basename "$trimmed_pbf_url")
+        pbf_path="$DOWNLOAD_DIR/$pbf_filename"
+
+        if [ ! -f "$pbf_path" ]; then
+            echo "  Downloading PBF: $pbf_filename..."
+            curl -fsL -o "$pbf_path" "$trimmed_pbf_url"
+            echo "  PBF downloaded."
+        else
+            echo "  PBF already exists: $pbf_filename"
+        fi
+
+        poly_filename=$(basename "$trimmed_poly_url")
+        poly_path="$DOWNLOAD_DIR/$poly_filename"
+
+        if [ ! -f "$poly_path" ]; then
+            echo "  Downloading Poly: $poly_filename..."
+            curl -fsL -o "$poly_path" "$trimmed_poly_url"
+            echo "  Poly downloaded."
+        else
+            echo "  Poly already exists: $poly_filename"
+        fi
+
+        pbf_paths+=("$pbf_path")
+        poly_paths+=("$poly_path")
+    done
+
+    PBF_FILES+=("$(IFS=';'; echo "${pbf_paths[*]}")")
+    POLY_FILES+=("$(IFS=';'; echo "${poly_paths[*]}")")
     ORIGINAL_NAMES+=("$original_name")
     
 done < "$CSV_FILE"
@@ -139,6 +189,19 @@ echo ""
 echo "=========================================="
 echo "Found ${#PBF_FILES[@]} entries to process"
 echo "=========================================="
+echo ""
+echo "Mapsforge configuration:"
+echo "  Writer Type:  $MAP_WRITER_TYPE"
+echo "  Threads:      ${THREADS:-auto}"
+if [ -n "$JAVA_XMS" ] || [ -n "$JAVA_XMX" ]; then
+    echo "  Java Heap:    -Xms$JAVA_XMS -Xmx$JAVA_XMX"
+else
+    echo "  Java Heap:    auto"
+fi
+echo "  Java tmpdir:  $TMP_DIR"
+echo "  Tag Profile:  $MAP_TAG_PROFILE"
+echo "  HD Fallback:  $(if [ -n "$MAP_ALLOW_HD_FALLBACK" ]; then echo "enabled"; else echo "disabled by default"; fi)"
+echo "  Resume:       $(if [ -n "$RESUME_MODE" ]; then echo "skip existing final maps"; else echo "off"; fi)"
 echo ""
 
 if [ ! -f "$TAG_CONF_FILE" ]; then
@@ -291,6 +354,162 @@ except Exception as e:
     echo "$date_string"
 }
 
+extract_combined_pbf_date() {
+    local latest_date=""
+    local pbf_file
+    for pbf_file in "$@"; do
+        current_date=$(extract_pbf_date "$pbf_file")
+        if [ -n "$current_date" ] && { [ -z "$latest_date" ] || [ "$current_date" \> "$latest_date" ]; }; then
+            latest_date="$current_date"
+        fi
+    done
+
+    echo "$latest_date"
+}
+
+find_existing_output_map() {
+    local output_dir="$1"
+    local country_code="$2"
+    local product_code="$3"
+    local date_string="$4"
+    local geocode="$5"
+
+    if [ -z "$date_string" ] || [ -z "$geocode" ] || [ ! -d "$output_dir" ]; then
+        return 1
+    fi
+
+    local expected_path="$output_dir/${country_code}${product_code}${date_string}${geocode}.map"
+    if [ -f "$expected_path" ]; then
+        echo "$expected_path"
+        return 0
+    fi
+
+    local metadata_path
+    for metadata_path in "$output_dir"/*.map.build.json; do
+        [ -f "$metadata_path" ] || continue
+        metadata_value_matches "$metadata_path" "CountryCode" "$country_code" || continue
+        metadata_value_matches "$metadata_path" "ProductCode" "$product_code" || continue
+        metadata_value_matches "$metadata_path" "SourceDate" "$date_string" || continue
+        if metadata_value_matches "$metadata_path" "OriginalTileGeocode" "$geocode" ||
+           metadata_value_matches "$metadata_path" "TileGeocode" "$geocode"; then
+            local map_path="${metadata_path%.build.json}"
+            if [ -f "$map_path" ]; then
+                echo "$map_path"
+                return 0
+            fi
+        fi
+    done
+
+    return 1
+}
+
+build_metadata_path() {
+    echo "$1.build.json"
+}
+
+join_input_basenames() {
+    local joined=""
+    local input_file
+    for input_file in "$@"; do
+        if [ -n "$joined" ]; then
+            joined="${joined};"
+        fi
+        joined="${joined}$(basename "$input_file")"
+    done
+    echo "$joined"
+}
+
+metadata_value_matches() {
+    local metadata_path="$1"
+    local key="$2"
+    local value="$3"
+
+    grep -F "\"$key\": \"$value\"" "$metadata_path" >/dev/null 2>&1
+}
+
+build_profile_matches() {
+    local map_path="$1"
+    local metadata_path
+    metadata_path=$(build_metadata_path "$map_path")
+
+    if [ ! -f "$metadata_path" ]; then
+        return 1
+    fi
+
+    metadata_value_matches "$metadata_path" "FormatVersion" "1" &&
+    metadata_value_matches "$metadata_path" "OriginalName" "$ORIGINAL_NAME" &&
+    metadata_value_matches "$metadata_path" "CountryCode" "$COUNTRY_CODE" &&
+    metadata_value_matches "$metadata_path" "ProductCode" "$PRODUCT_CODE" &&
+    metadata_value_matches "$metadata_path" "SourceDate" "$date_string" &&
+    metadata_value_matches "$metadata_path" "TileGeocode" "$TILE_GEOCODE" &&
+    metadata_value_matches "$metadata_path" "SourceMode" "$source_mode" &&
+    metadata_value_matches "$metadata_path" "PbfFiles" "$build_pbf_files" &&
+    metadata_value_matches "$metadata_path" "MapTagProfile" "$MAP_TAG_PROFILE" &&
+    metadata_value_matches "$metadata_path" "PreclipMode" "$MAP_PRECLIP_MODE" &&
+    metadata_value_matches "$metadata_path" "PreclipStatus" "$preclip_status" &&
+    metadata_value_matches "$metadata_path" "PreclipStrategy" "$MAP_PRECLIP_STRATEGY" &&
+    metadata_value_matches "$metadata_path" "Igs630HeaderPatch" "$igs630_header_patch" &&
+    metadata_value_matches "$metadata_path" "TagConfFile" "$(basename "$TAG_CONF_FILE")" &&
+    metadata_value_matches "$metadata_path" "TagTransformFile" "$(basename "$TAG_TRANSFORM_FILE")" &&
+    metadata_value_matches "$metadata_path" "MapsforgeWriterVersion" "$MAPSFORGE_WRITER_VERSION" &&
+    metadata_value_matches "$metadata_path" "ZoomIntervalConf" "13,13,13,14,14,14"
+}
+
+write_build_profile() {
+    local map_path="$1"
+    local metadata_path
+    metadata_path=$(build_metadata_path "$map_path")
+
+    cat > "$metadata_path" <<EOF
+{
+  "FormatVersion": "1",
+  "OriginalName": "$ORIGINAL_NAME",
+  "CountryCode": "$COUNTRY_CODE",
+  "ProductCode": "$PRODUCT_CODE",
+  "SourceDate": "$date_string",
+  "TileGeocode": "$TILE_GEOCODE",
+  "OriginalTileGeocode": "$TILE_GEOCODE",
+  "GeneratedDataGeocode": "$generated_data_geocode",
+  "SourceMode": "$source_mode",
+  "PbfFiles": "$build_pbf_files",
+  "MapTagProfile": "$MAP_TAG_PROFILE",
+  "PreclipMode": "$MAP_PRECLIP_MODE",
+  "PreclipStatus": "$preclip_status",
+  "PreclipStrategy": "$MAP_PRECLIP_STRATEGY",
+  "Igs630HeaderPatch": "$igs630_header_patch",
+  "TagConfFile": "$(basename "$TAG_CONF_FILE")",
+  "TagTransformFile": "$(basename "$TAG_TRANSFORM_FILE")",
+  "MapsforgeWriterVersion": "$MAPSFORGE_WRITER_VERSION",
+  "ZoomIntervalConf": "13,13,13,14,14,14"
+}
+EOF
+}
+
+repair_igs630_map_header() {
+    local original_map="$1"
+    local generated_map="$2"
+
+    case "$MAP_TAG_PROFILE" in
+        igs630|strict|compat) ;;
+        *) return 0 ;;
+    esac
+
+    if [ -z "$original_map" ] || [ ! -f "$original_map" ]; then
+        echo "ERROR: Original map for iGS630 header patch not found: $original_map" >&2
+        return 1
+    fi
+
+    local patch_script="$SCRIPT_DIR/patch_mapsforge_header.py"
+    if [ ! -f "$patch_script" ]; then
+        echo "ERROR: iGS630 header patch script not found: $patch_script" >&2
+        return 1
+    fi
+
+    local python_exe="${PYTHON:-python3}"
+    echo "Applying iGS630 header compatibility patch..."
+    "$python_exe" "$patch_script" "$original_map" "$generated_map"
+}
+
 convert_to_base36() {
     local value=$1
     local length=$2
@@ -306,6 +525,58 @@ convert_to_base36() {
     done
     
     echo "$result"
+}
+
+base36_decode() {
+    local value
+    value=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+    local result=0
+    local i
+    for (( i=0; i<${#value}; i++ )); do
+        local char="${value:$i:1}"
+        local index="${BASE36_CHARS%%$char*}"
+        local digit=${#index}
+        result=$((result * 36 + digit))
+    done
+
+    echo "$result"
+}
+
+tile_x_to_lon() {
+    local x="$1"
+    local tiles_per_side="$2"
+    awk -v x="$x" -v tiles="$tiles_per_side" 'BEGIN { printf("%.10f", (x / tiles) * 360.0 - 180.0) }'
+}
+
+tile_y_to_lat() {
+    local y="$1"
+    local tiles_per_side="$2"
+    awk -v y="$y" -v tiles="$tiles_per_side" 'BEGIN {
+        pi = atan2(0, -1)
+        n = pi * (1.0 - 2.0 * y / tiles)
+        printf("%.10f", atan2((exp(n) - exp(-n)) / 2.0, 1.0) * 180.0 / pi)
+    }'
+}
+
+get_original_tile_bbox() {
+    local original_name="$1"
+    local base_name="${original_name%.map}"
+    local geocode="${base_name:12:12}"
+    local min_lon_x
+    local max_lat_y
+    local lon_span
+    local lat_span
+
+    min_lon_x=$(base36_decode "${geocode:0:3}")
+    max_lat_y=$(base36_decode "${geocode:3:3}")
+    lon_span=$(( $(base36_decode "${geocode:6:3}") + 1 ))
+    lat_span=$(( $(base36_decode "${geocode:9:3}") + 1 ))
+
+    TILE_MIN_LON=$(tile_x_to_lon "$min_lon_x" "$ZOOM")
+    TILE_MIN_LAT=$(tile_y_to_lat "$((max_lat_y + lat_span))" "$ZOOM")
+    TILE_MAX_LON=$(tile_x_to_lon "$((min_lon_x + lon_span))" "$ZOOM")
+    TILE_MAX_LAT=$(tile_y_to_lat "$max_lat_y" "$ZOOM")
+    TILE_GEOCODE="$geocode"
 }
 
 convert_to_tile_x() {
@@ -337,46 +608,430 @@ get_geo_name() {
     echo "$(convert_to_base36 $x_start 3)$(convert_to_base36 $y_start 3)$(convert_to_base36 $((x_span - 1)) 3)$(convert_to_base36 $((y_span - 1)) 3)"
 }
 
+get_total_physical_memory_bytes() {
+    if [ -r /proc/meminfo ]; then
+        awk '/MemTotal:/ {print $2 * 1024; exit}' /proc/meminfo
+        return
+    fi
+
+    if command -v sysctl >/dev/null 2>&1; then
+        sysctl -n hw.memsize 2>/dev/null
+        return
+    fi
+
+    echo 0
+}
+
+bytes_to_heap_string() {
+    local bytes="$1"
+    local gigabytes=$((bytes / 1024 / 1024 / 1024))
+    if [ "$gigabytes" -lt 1 ]; then
+        gigabytes=1
+    fi
+    echo "${gigabytes}g"
+}
+
+heap_string_to_bytes() {
+    local value
+    value=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+    case "$value" in
+        *g) echo $(( ${value%g} * 1024 * 1024 * 1024 )) ;;
+        *m) echo $(( ${value%m} * 1024 * 1024 )) ;;
+        *) echo "$value" ;;
+    esac
+}
+
+get_auto_map_writer_config() {
+    local pbf_size_bytes="$1"
+    local total_physical_bytes="$2"
+    local min_ram_heap_bytes=$((4 * 1024 * 1024 * 1024))
+    local max_auto_heap_bytes=$((total_physical_bytes * 4 / 5))
+    local max_auto_heap_string
+    max_auto_heap_string=$(bytes_to_heap_string "$max_auto_heap_bytes")
+
+    if [ "$pbf_size_bytes" -le $((350 * 1024 * 1024)) ]; then
+        preferred="ram|2|2g|$max_auto_heap_string"
+    elif [ "$pbf_size_bytes" -le $((700 * 1024 * 1024)) ]; then
+        preferred="ram|1|3g|$max_auto_heap_string"
+    elif [ "$pbf_size_bytes" -le $((1024 * 1024 * 1024)) ]; then
+        preferred="ram|1|6g|$max_auto_heap_string"
+    else
+        preferred="ram|1|8g|$max_auto_heap_string"
+    fi
+
+    IFS='|' read -r preferred_writer preferred_threads preferred_java_xms preferred_java_xmx <<< "$preferred"
+
+    requested_heap_bytes=$(heap_string_to_bytes "$preferred_java_xmx")
+    if [ "$(heap_string_to_bytes "$preferred_java_xms")" -gt "$requested_heap_bytes" ]; then
+        preferred_java_xms="$preferred_java_xmx"
+    fi
+
+    if [ "$max_auto_heap_bytes" -lt "$min_ram_heap_bytes" ]; then
+        echo "ram|1|$max_auto_heap_string|$max_auto_heap_string|ram_limited_by_total_ram"
+        return
+    fi
+
+    if [ "$requested_heap_bytes" -gt "$max_auto_heap_bytes" ]; then
+        effective_java_xmx=$(bytes_to_heap_string "$max_auto_heap_bytes")
+        if [ "$(heap_string_to_bytes "$preferred_java_xms")" -gt "$max_auto_heap_bytes" ]; then
+            effective_java_xms="$effective_java_xmx"
+        else
+            effective_java_xms="$preferred_java_xms"
+        fi
+        echo "ram|$preferred_threads|$effective_java_xms|$effective_java_xmx|ram_capped_by_total_ram"
+        return
+    fi
+
+    echo "$preferred_writer|$preferred_threads|$preferred_java_xms|$preferred_java_xmx|preferred_ram"
+}
+
+get_hd_config() {
+    echo "hd|1|2g|8g"
+}
+
+sha256_file() {
+    local path="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$path" | awk '{print $1}'
+        return
+    fi
+    shasum -a 256 "$path" | awk '{print $1}'
+}
+
+sha256_text() {
+    local value="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$value" | sha256sum | awk '{print $1}'
+        return
+    fi
+    printf '%s' "$value" | shasum -a 256 | awk '{print $1}'
+}
+
+file_mtime_ns() {
+    local path="$1"
+    stat -c '%Y000000000' "$path" 2>/dev/null || stat -f '%m000000000' "$path"
+}
+
+preclip_metadata_value_matches() {
+    local metadata_path="$1"
+    local key="$2"
+    local value="$3"
+    grep -F "\"$key\": \"$value\"" "$metadata_path" >/dev/null 2>&1
+}
+
+preclip_cache_paths() {
+    local source_pbf="$1"
+    local source_base
+    local source_size
+    local source_mtime
+    local source_hash
+    local bbox
+    local key_material
+    local key
+    local safe_source
+
+    source_base=$(basename "$source_pbf")
+    source_size=$(wc -c < "$source_pbf" | tr -d ' ')
+    source_mtime=$(file_mtime_ns "$source_pbf")
+    source_hash=$(sha256_file "$source_pbf")
+    bbox="$TILE_MIN_LON,$TILE_MIN_LAT,$TILE_MAX_LON,$TILE_MAX_LAT"
+    key_material="$PRECLIP_VERSION|$source_base|$source_size|$source_mtime|$source_hash|$TILE_GEOCODE|$bbox|$MAP_PRECLIP_STRATEGY"
+    key=$(sha256_text "$key_material" | cut -c1-24)
+    safe_source=$(echo "$source_base" | sed 's/[^A-Za-z0-9_.-]/_/g')
+
+    PRECLIP_SOURCE_BASE="$source_base"
+    PRECLIP_SOURCE_SIZE="$source_size"
+    PRECLIP_SOURCE_MTIME="$source_mtime"
+    PRECLIP_SOURCE_HASH="$source_hash"
+    PRECLIP_BBOX="$bbox"
+    PRECLIP_CACHE_FILE="$PRECLIP_CACHE_DIR/${safe_source}.${TILE_GEOCODE}.${key}.osm.pbf"
+    PRECLIP_METADATA_FILE="$PRECLIP_CACHE_FILE.json"
+}
+
+preclip_cache_valid() {
+    local metadata_path="$1"
+    [ -f "$PRECLIP_CACHE_FILE" ] &&
+    [ -f "$metadata_path" ] &&
+    preclip_metadata_value_matches "$metadata_path" "FormatVersion" "1" &&
+    preclip_metadata_value_matches "$metadata_path" "PreclipVersion" "$PRECLIP_VERSION" &&
+    preclip_metadata_value_matches "$metadata_path" "Strategy" "$MAP_PRECLIP_STRATEGY" &&
+    preclip_metadata_value_matches "$metadata_path" "SourceName" "$PRECLIP_SOURCE_BASE" &&
+    preclip_metadata_value_matches "$metadata_path" "SourceSize" "$PRECLIP_SOURCE_SIZE" &&
+    preclip_metadata_value_matches "$metadata_path" "SourceMtimeNs" "$PRECLIP_SOURCE_MTIME" &&
+    preclip_metadata_value_matches "$metadata_path" "SourceSha256" "$PRECLIP_SOURCE_HASH" &&
+    preclip_metadata_value_matches "$metadata_path" "TileGeocode" "$TILE_GEOCODE" &&
+    preclip_metadata_value_matches "$metadata_path" "BBox" "$PRECLIP_BBOX"
+}
+
+write_preclip_metadata() {
+    local metadata_path="$1"
+    cat > "$metadata_path" <<EOF
+{
+  "FormatVersion": "1",
+  "PreclipVersion": "$PRECLIP_VERSION",
+  "Strategy": "$MAP_PRECLIP_STRATEGY",
+  "SourceName": "$PRECLIP_SOURCE_BASE",
+  "SourceSize": "$PRECLIP_SOURCE_SIZE",
+  "SourceMtimeNs": "$PRECLIP_SOURCE_MTIME",
+  "SourceSha256": "$PRECLIP_SOURCE_HASH",
+  "TileGeocode": "$TILE_GEOCODE",
+  "BBox": "$PRECLIP_BBOX",
+  "OsmiumVersion": "$(osmium --version 2>/dev/null | head -n 1)"
+}
+EOF
+}
+
+apply_preclip_to_inputs() {
+    preclip_status="disabled"
+
+    if [ "$MAP_PRECLIP_MODE" = "disabled" ]; then
+        return 0
+    fi
+
+    if ! command -v osmium >/dev/null 2>&1; then
+        if [ "$MAP_PRECLIP_MODE" = "required" ]; then
+            echo "ERROR: MAP_PRECLIP_MODE=required but osmium is not available." >&2
+            return 1
+        fi
+        echo "Osmium preclip skipped: osmium is not available."
+        preclip_status="skipped-missing-osmium"
+        return 0
+    fi
+
+    mkdir -p "$PRECLIP_CACHE_DIR"
+    local clipped_inputs=()
+    local source_pbf
+    local tmp_cache
+    local run_status
+
+    for source_pbf in "${INPUT_FILES[@]}"; do
+        preclip_cache_paths "$source_pbf"
+
+        if preclip_cache_valid "$PRECLIP_METADATA_FILE"; then
+            echo "Osmium preclip cache hit: $(basename "$PRECLIP_CACHE_FILE")"
+            clipped_inputs+=("$PRECLIP_CACHE_FILE")
+            continue
+        fi
+
+        echo "Osmium preclip cache miss: $(basename "$source_pbf") -> $(basename "$PRECLIP_CACHE_FILE")"
+        tmp_cache="$PRECLIP_CACHE_FILE.tmp"
+        rm -f "$tmp_cache"
+        set +e
+        osmium extract \
+            -b "$PRECLIP_BBOX" \
+            -s "$MAP_PRECLIP_STRATEGY" \
+            -f pbf \
+            --overwrite \
+            -o "$tmp_cache" \
+            "$source_pbf"
+        run_status=$?
+        set -e
+
+        if [ "$run_status" -ne 0 ]; then
+            rm -f "$tmp_cache"
+            if [ "$MAP_PRECLIP_MODE" = "required" ]; then
+                echo "ERROR: Osmium preclip failed for $source_pbf." >&2
+                return "$run_status"
+            fi
+            echo "WARNING: Osmium preclip failed for $source_pbf; using original PBF."
+            preclip_status="fallback-preclip-failed"
+            return 0
+        fi
+
+        mv "$tmp_cache" "$PRECLIP_CACHE_FILE"
+        write_preclip_metadata "$PRECLIP_METADATA_FILE"
+        clipped_inputs+=("$PRECLIP_CACHE_FILE")
+    done
+
+    INPUT_FILES=("${clipped_inputs[@]}")
+    preclip_status="used"
+}
+
+run_osmosis_map_writer() {
+    local writer_type="$1"
+    local threads="$2"
+    local java_xms="$3"
+    local java_xmx="$4"
+    local cmd=("$OSMOSIS_DIR/bin/osmosis-with-mapsforge")
+
+    export JAVA_OPTS="-Xms$java_xms -Xmx$java_xmx -Djava.io.tmpdir=$TMP_DIR"
+    rm -f "$OUTPUT_FILE"
+
+    for source_index in "${!INPUT_FILES[@]}"; do
+        cmd+=(
+            --read-pbf-fast "file=${INPUT_FILES[$source_index]}"
+            --bounding-polygon "file=${INPUT_POLY_FILES[$source_index]}"
+            --tag-transform "file=$TAG_TRANSFORM_FILE"
+        )
+
+        if [ "$source_index" -ge 1 ]; then
+            cmd+=(--merge)
+        fi
+    done
+
+    cmd+=(
+        --bounding-box
+        "left=$TILE_MIN_LON"
+        "right=$TILE_MAX_LON"
+        "bottom=$TILE_MIN_LAT"
+        "top=$TILE_MAX_LAT"
+    )
+
+    cmd+=(
+        --mapfile-writer "file=$OUTPUT_FILE"
+        "type=$writer_type"
+        "zoom-interval-conf=13,13,13,14,14,14"
+        "threads=$threads"
+        "tag-conf-file=$TAG_CONF_FILE"
+    )
+
+    "${cmd[@]}"
+}
+
 file_index=0
+failure_count=0
 for i in "${!PBF_FILES[@]}"; do
     file_index=$((file_index + 1))
-    INPUT_FILE="${PBF_FILES[$i]}"
-    POLY_FILE="${POLY_FILES[$i]}"
+    IFS=';' read -r -a INPUT_FILES <<< "${PBF_FILES[$i]}"
+    IFS=';' read -r -a INPUT_POLY_FILES <<< "${POLY_FILES[$i]}"
     ORIGINAL_NAME="${ORIGINAL_NAMES[$i]}"
-    file_name=$(basename "$INPUT_FILE")
-    
+    if [ "${#INPUT_FILES[@]}" -eq 1 ]; then
+        file_name=$(basename "${INPUT_FILES[0]}")
+        poly_name=$(basename "${INPUT_POLY_FILES[0]}")
+    else
+        file_name="${#INPUT_FILES[@]} merged sources"
+        poly_name="${#INPUT_POLY_FILES[@]} matching polygons"
+    fi
+
     # Extract country code from original filename (first 2 characters)
     COUNTRY_CODE="${ORIGINAL_NAME:0:2}"
-    
+
     # Extract product code from original filename (characters 2-5, 0-indexed)
     PRODUCT_CODE="${ORIGINAL_NAME:2:4}"
-    
+    get_original_tile_bbox "$ORIGINAL_NAME"
+    if [ "${#INPUT_FILES[@]}" -eq 1 ]; then
+        source_mode="single-region"
+    else
+        source_mode="multi-region blend (${#INPUT_FILES[@]} sources)"
+    fi
+    build_pbf_files=$(join_input_basenames "${INPUT_FILES[@]}")
+    case "$MAP_TAG_PROFILE" in
+        igs630|strict|compat) igs630_header_patch="created_by_from_original" ;;
+        *) igs630_header_patch="off" ;;
+    esac
+
     # Extract date from PBF file before processing
     echo "Extracting date from PBF file..."
-    date_string=$(extract_pbf_date "$INPUT_FILE")
+    date_string=$(extract_combined_pbf_date "${INPUT_FILES[@]}")
+
+    apply_preclip_to_inputs
+
+    pbf_size_bytes=0
+    for pbf_file in "${INPUT_FILES[@]}"; do
+        file_size=$(wc -c < "$pbf_file" | tr -d ' ')
+        pbf_size_bytes=$((pbf_size_bytes + file_size))
+    done
+    pbf_size_mb=$((pbf_size_bytes / 1024 / 1024))
+    total_physical_bytes=$(get_total_physical_memory_bytes)
+    total_physical_gb=$(awk -v total="$total_physical_bytes" 'BEGIN { printf("%.2f", total / 1024 / 1024 / 1024) }')
+    IFS='|' read -r auto_writer_type auto_threads auto_java_xms auto_java_xmx auto_reason <<< "$(get_auto_map_writer_config "$pbf_size_bytes" "$total_physical_bytes")"
+    requested_writer_type="$MAP_WRITER_TYPE"
+    if [ "$requested_writer_type" = "auto" ]; then
+        requested_writer_type="$auto_writer_type"
+    fi
+    if [ "$requested_writer_type" = "hd" ]; then
+        IFS='|' read -r base_writer_type base_threads base_java_xms base_java_xmx <<< "$(get_hd_config)"
+    else
+        base_writer_type="$auto_writer_type"
+        base_threads="$auto_threads"
+        base_java_xms="$auto_java_xms"
+        base_java_xmx="$auto_java_xmx"
+    fi
+    effective_threads="${THREADS:-$base_threads}"
+    effective_java_xms="${JAVA_XMS:-$base_java_xms}"
+    effective_java_xmx="${JAVA_XMX:-$base_java_xmx}"
+
+    existing_output=""
+    if [ -n "$RESUME_MODE" ]; then
+        existing_output=$(find_existing_output_map "$OUTPUT_DIR" "$COUNTRY_CODE" "$PRODUCT_CODE" "$date_string" "$TILE_GEOCODE" || true)
+    fi
     
     echo "=========================================="
     echo "Processing [$file_index/${#PBF_FILES[@]}]"
     echo "  PBF File:      $file_name"
-    echo "  Poly File:     $(basename "$POLY_FILE")"
+    echo "  Poly File:     $poly_name"
+    echo "  Source Mode:   $source_mode"
     echo "  Original Name: $ORIGINAL_NAME"
     echo "  Country Code:  $COUNTRY_CODE"
     echo "  Product Code:  $PRODUCT_CODE"
+    echo "  Tile Geocode:  $TILE_GEOCODE"
+    echo "  Tile BBox:     minLat=$TILE_MIN_LAT minLng=$TILE_MIN_LON maxLat=$TILE_MAX_LAT maxLng=$TILE_MAX_LON"
     echo "  PBF Date:      $date_string"
+    echo "  PBF Size:      ${pbf_size_mb} MB"
+    echo "  Preclip Mode:  $MAP_PRECLIP_MODE ($preclip_status)"
+    echo "  Total RAM:     ${total_physical_gb} GB"
+    echo "  Writer Type:   $requested_writer_type"
+    echo "  Threads:       $effective_threads"
+    echo "  Java Heap:     -Xms$effective_java_xms -Xmx$effective_java_xmx"
+    if [ "$MAP_WRITER_TYPE" = "auto" ]; then
+        if [ "$auto_reason" = "ram_capped_by_total_ram" ]; then
+            echo "  Auto Decision: ram profile capped to about 80% of installed RAM"
+        elif [ "$auto_reason" = "ram_limited_by_total_ram" ]; then
+            echo "  Auto Decision: total RAM below preferred profile, using capped ram"
+        else
+            echo "  Auto Decision: ram writer only; set MAP_WRITER_TYPE=hd or MAP_ALLOW_HD_FALLBACK=1 to use hd"
+        fi
+    fi
     echo "=========================================="
+
+    if [ -n "$existing_output" ] && build_profile_matches "$existing_output"; then
+        echo "Skipping existing output in resume mode: $(basename "$existing_output")"
+        echo ""
+        continue
+    elif [ -n "$existing_output" ]; then
+        metadata_path=$(build_metadata_path "$existing_output")
+        if [ -f "$metadata_path" ]; then
+            echo "Existing output does not match current build profile; rebuilding: $(basename "$existing_output")"
+        else
+            echo "Existing output has no build profile metadata; rebuilding: $(basename "$existing_output")"
+        fi
+    fi
     
     OUTPUT_FILE="$OUTPUT_DIR/out_$file_index.map"
     
     echo "Running osmosis..."
-    "$OSMOSIS_DIR/bin/osmosis-with-mapsforge" \
-        --read-pbf-fast file="$INPUT_FILE" \
-        --bounding-polygon file="$POLY_FILE" \
-        --tag-transform file="$TAG_TRANSFORM_FILE" \
-        --mapfile-writer file="$OUTPUT_FILE" type=hd zoom-interval-conf=13,13,13,14,14,14 threads=$THREADS tag-conf-file="$TAG_CONF_FILE"
+    run_status=0
+    run_osmosis_map_writer "$requested_writer_type" "$effective_threads" "$effective_java_xms" "$effective_java_xmx" || run_status=$?
+    final_writer_type="$requested_writer_type"
+    final_threads="$effective_threads"
+    final_java_xms="$effective_java_xms"
+    final_java_xmx="$effective_java_xmx"
+
+    if [ $run_status -ne 0 ] && [ "$MAP_WRITER_TYPE" = "auto" ] && [ "$requested_writer_type" = "ram" ] && [ -n "$MAP_ALLOW_HD_FALLBACK" ]; then
+        IFS='|' read -r hd_writer_type hd_threads hd_java_xms hd_java_xmx <<< "$(get_hd_config)"
+        fallback_threads="${THREADS:-$hd_threads}"
+        fallback_java_xms="${JAVA_XMS:-$hd_java_xms}"
+        fallback_java_xmx="${JAVA_XMX:-$hd_java_xmx}"
+        echo "WARNING: RAM writer attempt failed for $file_name. Retrying with hd..."
+        run_status=0
+        run_osmosis_map_writer "hd" "$fallback_threads" "$fallback_java_xms" "$fallback_java_xmx" || run_status=$?
+
+        if [ $run_status -eq 0 ]; then
+            final_writer_type="hd"
+            final_threads="$fallback_threads"
+            final_java_xms="$fallback_java_xms"
+            final_java_xmx="$fallback_java_xmx"
+        fi
+    fi
     
-    if [ ! -f "$OUTPUT_FILE" ]; then
+    if [ $run_status -ne 0 ] || [ ! -f "$OUTPUT_FILE" ]; then
         echo "WARNING: Osmosis did not generate file for: $file_name - skipping"
+        failure_count=$((failure_count + 1))
         continue
+    fi
+
+    if [ "$final_writer_type" != "$requested_writer_type" ]; then
+        echo "Completed with fallback writer: $final_writer_type (threads=$final_threads, heap=-Xms$final_java_xms -Xmx$final_java_xmx)"
     fi
     
     echo "Osmosis completed. Generating name..."
@@ -387,6 +1042,7 @@ for i in "${!PBF_FILES[@]}"; do
         
         if [ "$magic" != "$MAGIC_STRING" ]; then
             echo "WARNING: Invalid .map file for: $file_name - skipping"
+            failure_count=$((failure_count + 1))
             continue
         fi
         
@@ -428,7 +1084,9 @@ for i in "${!PBF_FILES[@]}"; do
         max_lat=$(echo "scale=6; $max_lat_micro / 1000000.0" | bc)
         max_lng=$(echo "scale=6; $max_lng_micro / 1000000.0" | bc)
         
-        geo_name=$(get_geo_name "$min_lng" "$max_lng" "$min_lat" "$max_lat")
+        actual_geo_name=$(get_geo_name "$min_lng" "$max_lng" "$min_lat" "$max_lat")
+        geo_name="$actual_geo_name"
+        generated_data_geocode="$actual_geo_name"
         
         new_name="${COUNTRY_CODE}${PRODUCT_CODE}${date_string}${geo_name}"
         new_path="$OUTPUT_DIR/$new_name.map"
@@ -437,13 +1095,23 @@ for i in "${!PBF_FILES[@]}"; do
         echo "  Date (from PBF): $date_string"
         echo "  Bounding Box: minLat=$min_lat minLng=$min_lng maxLat=$max_lat maxLng=$max_lng"
         echo "  Geo Code:    $geo_name"
+        if [ "$actual_geo_name" != "$TILE_GEOCODE" ]; then
+            echo "  Original Geo: $TILE_GEOCODE"
+        fi
         echo "  Generated:   $new_name.map"
         
         if [ -f "$new_path" ]; then
             rm -f "$new_path"
         fi
         
+        original_map_path="$INPUT_DIR/$ORIGINAL_NAME"
+        if ! repair_igs630_map_header "$original_map_path" "$OUTPUT_FILE"; then
+            echo "WARNING: Error processing file: iGS630 header compatibility patch failed"
+            failure_count=$((failure_count + 1))
+            continue
+        fi
         mv "$OUTPUT_FILE" "$new_path"
+        write_build_profile "$new_path"
         
         echo ""
     } < "$OUTPUT_FILE"
@@ -451,4 +1119,8 @@ done
 
 echo "=========================================="
 echo "Done! Processed ${#PBF_FILES[@]} files."
+if [ "$failure_count" -gt 0 ]; then
+    echo "Failed: $failure_count file(s)."
+    exit 1
+fi
 echo "=========================================="
