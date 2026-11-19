@@ -233,17 +233,6 @@ app/package.sh --type deb --type app-image    # several types; app-image is arch
 .\app\package.ps1 -Type msi,app-image         # app-image is archived as .zip
 ```
 
-### Releases
-
-Pushing a version tag builds the installers on Linux, Windows and macOS and publishes them as a GitHub release ([.github/workflows/release.yml](.github/workflows/release.yml)):
-
-```bash
-git tag v1.1.0
-git push origin v1.1.0
-```
-
-Tags must look like `v1.2.3`, because installers only accept numeric versions.
-
 ## License
 
 This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
