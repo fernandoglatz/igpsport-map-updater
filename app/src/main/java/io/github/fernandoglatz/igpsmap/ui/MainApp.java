@@ -1,0 +1,411 @@
+package io.github.fernandoglatz.igpsmap.ui;
+
+import io.github.fernandoglatz.igpsmap.config.Settings;
+import io.github.fernandoglatz.igpsmap.device.DetectedMap;
+import io.github.fernandoglatz.igpsmap.device.DetectedSource;
+import io.github.fernandoglatz.igpsmap.device.DeviceScanner;
+import io.github.fernandoglatz.igpsmap.matching.MapJob;
+import io.github.fernandoglatz.igpsmap.pipeline.CancelToken;
+import io.github.fernandoglatz.igpsmap.pipeline.JobResult;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.concurrent.Task;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.Stage;
+
+/** Main window: source bar, review table, settings footer; swaps to the run view while generating. */
+public final class MainApp extends Application {
+
+    private AppController controller;
+    private Stage stage;
+
+    private final ComboBox<DetectedSource> sources = new ComboBox<>();
+    private final ReviewTable table = new ReviewTable();
+    private final CoverageView coverage = new CoverageView();
+    private final javafx.scene.control.TabPane tabs = new javafx.scene.control.TabPane();
+    private final RunView runView = new RunView();
+    private final Label status = new Label("Looking for IGPSPORT devices…");
+    private final Label folderLabel = new Label();
+    private final Button openFolder = new Button("Open folder");
+    private final ProgressBar busy = new ProgressBar();
+    private final TextField outputDir = new TextField();
+    private final Spinner<Integer> threads = new Spinner<>(1, 16, 4);
+    private final Spinner<Integer> heap = new Spinner<>(2, 64, 8);
+    private final Button generate = new Button("Generate");
+    private final Button edit = new Button("Edit match…");
+    private final StackPane center = new StackPane();
+    private BorderPane reviewPane;
+    private CancelToken cancelToken;
+    /** Increments per match request so results of superseded requests are ignored. */
+    private int matchRequest;
+
+    @Override
+    public void start(Stage primaryStage) {
+        stage = primaryStage;
+        controller = AppController.createDefault(Path.of("").toAbsolutePath());
+        Settings settings = controller.settings();
+        outputDir.setText(PathText.display(settings.outputDir(), PathText.home()));
+        threads.getValueFactory().setValue(settings.threads());
+        heap.getValueFactory().setValue(settings.maxHeapGb());
+
+        javafx.scene.control.Tab reviewTab = new javafx.scene.control.Tab("Review", reviewContent());
+        javafx.scene.control.Tab coverageTab = new javafx.scene.control.Tab("Coverage", coverage);
+        tabs.getTabs().addAll(reviewTab, coverageTab);
+        tabs.setTabClosingPolicy(javafx.scene.control.TabPane.TabClosingPolicy.UNAVAILABLE);
+        coverage.setOnOpen(job -> {
+            tabs.getSelectionModel().select(reviewTab);
+            table.reveal(job);
+        });
+        reviewPane = new BorderPane(tabs, sourceBar(), null, footer(), null);
+        center.getChildren().addAll(reviewPane, runView);
+        runView.setVisible(false);
+
+        table.setEditor(job -> new EditJobDialog(stage, job).showAndWait().orElse(job));
+        table.setOnSelectionChanged(() -> {
+            updateGenerateButton();
+            coverage.setModel(CoverageModel.of(table.allJobs(), table.selectedJobs()));
+        });
+        runView.cancel.setOnAction(e -> {
+            if (cancelToken != null) {
+                cancelToken.cancel();
+                runView.cancel.setDisable(true);
+            }
+        });
+        runView.back.setOnAction(e -> showReview());
+        runView.openOutput.setOnAction(e -> getHostServices().showDocument(
+                PathText.parse(outputDir.getText(), PathText.home()).toUri().toString()));
+
+        Scene scene = new Scene(center, 1100, 700);
+        scene.getStylesheets().add(MainApp.class.getResource("/ui/app.css").toExternalForm());
+        stage.setTitle("IGPSPORT Map Updater");
+        stage.setScene(scene);
+        stage.show();
+        updateGenerateButton();
+        loadBaseMap();
+        detectDevices();
+    }
+
+    private VBox sourceBar() {
+        sources.setPromptText("No IGPSPORT device found");
+        sources.setConverter(new javafx.util.StringConverter<>() {
+            @Override
+            public String toString(DetectedSource source) {
+                return source == null ? "" : source.label();
+            }
+
+            @Override
+            public DetectedSource fromString(String text) {
+                return null;
+            }
+        });
+        sources.setMaxWidth(Double.MAX_VALUE);
+        sources.valueProperty().addListener((obs, old, source) -> {
+            sources.setTooltip(source == null ? null : new javafx.scene.control.Tooltip(source.root().toString()));
+            String folder = source == null ? "" : SourceFolders.describe(source.root(), source.maps());
+            folderLabel.setText(folder);
+            folderLabel.setTooltip(source == null ? null : new javafx.scene.control.Tooltip(folder));
+            openFolder.setDisable(source == null);
+        });
+        sources.setOnAction(e -> {
+            DetectedSource source = sources.getValue();
+            if (source != null) {
+                matchMaps(source.maps());
+            }
+        });
+        Button choose = new Button("Choose folder…");
+        choose.setOnAction(e -> chooseFolder());
+        Button rescan = new Button("⟳ Rescan");
+        rescan.setOnAction(e -> detectDevices());
+        Button refresh = new Button("Refresh sources");
+        refresh.setOnAction(e -> run("Clearing cached sources…", () -> {
+            controller.refreshSources();
+            return null;
+        }, ignored -> {
+            DetectedSource source = sources.getValue();
+            if (source != null) {
+                matchMaps(source.maps());
+            }
+        }));
+        HBox.setHgrow(sources, Priority.ALWAYS);
+        sources.setMinWidth(200);
+        HBox row = new HBox(8, new Label("Source:"), sources, choose, rescan, refresh);
+        row.setAlignment(Pos.CENTER_LEFT);
+        keepPreferredWidth(row);
+
+        openFolder.setDisable(true);
+        openFolder.setOnAction(e -> {
+            DetectedSource source = sources.getValue();
+            if (source != null) {
+                getHostServices().showDocument(source.root().toUri().toString());
+            }
+        });
+        Label folderTitle = new Label("Folder:");
+        folderTitle.setMinWidth(Region.USE_PREF_SIZE);
+        openFolder.setMinWidth(Region.USE_PREF_SIZE);
+        folderLabel.setMinWidth(0);
+        // Always show the full path: wrap long ones instead of shortening them.
+        folderLabel.setWrapText(true);
+        HBox.setHgrow(folderLabel, Priority.ALWAYS);
+        folderLabel.getStyleClass().add("folder-path");
+        HBox folderRow = new HBox(8, folderTitle, folderLabel, openFolder);
+        folderRow.setAlignment(Pos.CENTER_LEFT);
+
+        busy.setVisible(false);
+        busy.setPrefWidth(200);
+        HBox statusRow = new HBox(8, status, busy);
+        statusRow.setAlignment(Pos.CENTER_LEFT);
+        VBox box = new VBox(6, row, folderRow, statusRow);
+        box.setPadding(new Insets(10, 12, 6, 12));
+        return box;
+    }
+
+    /** The review table with its toolbar: Check all, Uncheck all, Edit match. */
+    private BorderPane reviewContent() {
+        Button checkAll = new Button("Check all");
+        checkAll.setOnAction(e -> table.setAllSelected(true));
+        Button uncheckAll = new Button("Uncheck all");
+        uncheckAll.setOnAction(e -> table.setAllSelected(false));
+        edit.setOnAction(e -> table.editSelected());
+        HBox toolbar = new HBox(8, checkAll, uncheckAll, edit);
+        toolbar.setAlignment(Pos.CENTER_LEFT);
+        toolbar.setPadding(new Insets(6, 8, 6, 8));
+        return new BorderPane(table, toolbar, null, null, null);
+    }
+
+    private VBox footer() {
+        Button browse = new Button("…");
+        browse.setOnAction(e -> {
+            DirectoryChooser chooser = new DirectoryChooser();
+            chooser.setTitle("Output folder");
+            File dir = chooser.showDialog(stage);
+            if (dir != null) {
+                outputDir.setText(PathText.display(dir.toPath(), PathText.home()));
+            }
+        });
+        threads.setPrefWidth(80);
+        heap.setPrefWidth(80);
+
+        generate.setDefaultButton(true);
+        generate.setOnAction(e -> startGeneration());
+        HBox.setHgrow(outputDir, Priority.ALWAYS);
+        outputDir.setMinWidth(150);
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.SOMETIMES);
+        HBox row = new HBox(8, new Label("Output:"), outputDir, browse, new Label("Threads"), threads,
+                new Label("Max memory (GB)"), heap, spacer, generate);
+        row.setAlignment(Pos.CENTER_LEFT);
+        keepPreferredWidth(row);
+        Label hint = new Label("Rows matched with high confidence or from maps.csv start checked. "
+                + "Double-click a row to change its polygon or PBF. Java must have enough memory for large regions.");
+        hint.getStyleClass().add("hint");
+        VBox box = new VBox(6, row, hint);
+        box.setPadding(new Insets(8, 12, 10, 12));
+        return box;
+    }
+
+    /** Buttons, labels and spinners never shrink below their text; only fields and the combo grow/shrink. */
+    private static void keepPreferredWidth(HBox row) {
+        for (javafx.scene.Node node : row.getChildren()) {
+            if (node instanceof Button || node instanceof Label || node instanceof Spinner) {
+                ((Region) node).setMinWidth(Region.USE_PREF_SIZE);
+            }
+        }
+    }
+
+    private void detectDevices() {
+        run("Looking for IGPSPORT devices…", controller::detect, found -> {
+            sources.getItems().setAll(found);
+            if (found.isEmpty()) {
+                Path last = controller.settings().lastSourceFolder();
+                status.setText("No device with IGPSPORT maps found. Plug it in and rescan, or choose a folder.");
+                if (last != null && Files.isDirectory(last)) {
+                    loadFolder(last);
+                }
+            } else {
+                sources.getSelectionModel().select(0);
+            }
+        });
+    }
+
+    private void chooseFolder() {
+        DirectoryChooser chooser = new DirectoryChooser();
+        chooser.setTitle("Folder with original IGPSPORT maps");
+        Path last = controller.settings().lastSourceFolder();
+        if (last != null && Files.isDirectory(last)) {
+            chooser.setInitialDirectory(last.toFile());
+        }
+        File dir = chooser.showDialog(stage);
+        if (dir != null) {
+            controller.updateSettings(controller.settings().withLastSourceFolder(dir.toPath()));
+            loadFolder(dir.toPath());
+        }
+    }
+
+    private void loadFolder(Path folder) {
+        run("Scanning " + folder + "…", () -> controller.scanFolder(folder), maps -> {
+            DetectedSource source = new DetectedSource(DeviceScanner.label(folder, maps.size()), folder, maps);
+            sources.getItems().removeIf(s -> s.root().equals(folder));
+            sources.getItems().add(source);
+            sources.getSelectionModel().select(source); // triggers matching
+            if (maps.isEmpty()) {
+                status.setText("No IGPSPORT map files (like BR01002303102B83FO00N00E.map) in " + folder);
+            }
+        });
+    }
+
+    private void matchMaps(List<DetectedMap> maps) {
+        int request = ++matchRequest;
+        table.setJobs(List.of());
+        if (maps.isEmpty()) {
+            return;
+        }
+        Task<List<MapJob>> task = new Task<>() {
+            @Override
+            protected List<MapJob> call() throws Exception {
+                return controller.match(maps, p -> updateProgress(p, 1.0));
+            }
+        };
+        busy.progressProperty().bind(task.progressProperty());
+        runTask("Matching " + maps.size() + " maps to OpenStreetMap regions (first run downloads indexes)…", task, jobs -> {
+            if (request != matchRequest) {
+                return; // a newer match was started meanwhile; its result wins
+            }
+            busy.progressProperty().unbind();
+            table.setJobs(jobs);
+            long unmatched = jobs.stream().filter(j -> !j.runnable()).count();
+            status.setText(jobs.size() + " maps matched" + (unmatched > 0 ? ", " + unmatched + " unmatched" : "")
+                    + ". Review and press Generate.");
+        });
+    }
+
+    /** Natural Earth base map for the coverage tab, bundled with the app; parsed in the background. */
+    private void loadBaseMap() {
+        Task<BaseMap> task = new Task<>() {
+            @Override
+            protected BaseMap call() {
+                return BaseMap.bundled();
+            }
+        };
+        task.setOnSucceeded(e -> coverage.setBaseMap(task.getValue()));
+        Thread thread = new Thread(task, "base-map");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void startGeneration() {
+        List<MapJob> selected = table.selectedJobs();
+        if (selected.isEmpty()) {
+            return;
+        }
+        Path output;
+        try {
+            output = PathText.parse(outputDir.getText(), PathText.home()).toAbsolutePath();
+        } catch (java.nio.file.InvalidPathException e) {
+            Alert alert = new Alert(Alert.AlertType.ERROR, "Invalid output folder: " + e.getMessage());
+            alert.initOwner(stage);
+            alert.show();
+            return;
+        }
+        Settings settings = new Settings(output, threads.getValue(), heap.getValue(),
+                controller.settings().cacheMaxAge(), controller.settings().lastSourceFolder());
+        controller.updateSettings(settings);
+        cancelToken = new CancelToken();
+        CancelToken token = cancelToken;
+        runView.reset(selected.size());
+        reviewPane.setVisible(false);
+        runView.setVisible(true);
+
+        Task<List<JobResult>> task = new Task<>() {
+            @Override
+            protected List<JobResult> call() throws Exception {
+                controller.confirm(selected);
+                return controller.generate(selected, runView, token);
+            }
+        };
+        task.setOnSucceeded(e -> runView.finished(task.getValue()));
+        task.setOnFailed(e -> runView.failed(task.getException()));
+        Thread thread = new Thread(task, "generation");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void showReview() {
+        runView.setVisible(false);
+        reviewPane.setVisible(true);
+    }
+
+    private void updateGenerateButton() {
+        int n = table.selectedJobs().size();
+        generate.setText(n == 0 ? "Generate" : "Generate " + n + (n == 1 ? " map ▶" : " maps ▶"));
+        generate.setDisable(n == 0);
+    }
+
+    @FunctionalInterface
+    private interface Work<T> {
+        T call() throws Exception;
+    }
+
+    private <T> void run(String message, Work<T> work, java.util.function.Consumer<T> onDone) {
+        Task<T> task = new Task<>() {
+            @Override
+            protected T call() throws Exception {
+                return work.call();
+            }
+        };
+        busy.progressProperty().unbind();
+        busy.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+        runTask(message, task, onDone);
+    }
+
+    private <T> void runTask(String message, Task<T> task, java.util.function.Consumer<T> onDone) {
+        status.setText(message);
+        busy.setVisible(true);
+        task.setOnSucceeded(e -> {
+            busy.setVisible(false);
+            onDone.accept(task.getValue());
+        });
+        task.setOnFailed(e -> {
+            busy.setVisible(false);
+            busy.progressProperty().unbind();
+            Throwable error = task.getException();
+            status.setText("Error: " + error.getMessage());
+            Alert alert = new Alert(Alert.AlertType.ERROR, String.valueOf(error.getMessage()));
+            alert.initOwner(stage);
+            alert.setHeaderText(message.replace("…", "") + " failed");
+            alert.show();
+        });
+        Thread thread = new Thread(task, "worker");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    @Override
+    public void stop() {
+        if (cancelToken != null) {
+            cancelToken.cancel();
+        }
+        controller.shutdown();
+        Platform.exit();
+    }
+
+}

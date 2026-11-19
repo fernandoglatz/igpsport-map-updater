@@ -1,6 +1,6 @@
 # IGPSPORT Map Updater
 
-A tool to generate custom map files for IGPSPORT cycling computers from OpenStreetMap data. This project downloads OSM PBF files, filters them based on polygon boundaries, transforms unsupported tags, and generates Mapsforge map files with the specific naming convention required by IGPSPORT GPS devices.
+A desktop app that regenerates the offline maps of IGPSPORT cycling computers from current OpenStreetMap data. It finds the original maps on your device, works out the matching OpenStreetMap region for each one, and builds new Mapsforge `.map` files with the file names IGPSPORT devices expect.
 
 ## Supported Products
 
@@ -13,49 +13,68 @@ A tool to generate custom map files for IGPSPORT cycling computers from OpenStre
 
 Official support/download page: https://www.igpsport.com/en/support/product
 
-## Requirements
-
-- **Java 17** or higher
-- **Internet connection** (for downloading OSM data and dependencies)
-- **Disk space**: Several GB depending on the size of the regions being processed
-
-### Platform-Specific Requirements
-
-#### Windows
-- PowerShell 5.0 or higher (included in Windows 10/11)
-- Windows 7 or higher
-
-#### Unix/Linux/macOS
-- Bash shell
-- `curl` (for downloading files)
-- `unzip` (for extracting archives)
-- `bc` (for mathematical calculations)
-
 ## Important Notes
 
-### Before You Start
+⚠️ **Use At Your Own Risk**: I am not responsible for broken devices.
 
-⚠️ **Use At Your Own Risk**: Do it at your own risk; I am not responsible for broken devices.
+⚠️ **Back Up Your Maps**: Before copying new maps to the device, back up the existing ones (for example into a `Backup/` folder on your computer) so you can revert.
 
-⚠️ **Backup Your Maps**: Before using the new maps, make sure to backup your existing maps from your IGPSPORT cycle computer. Store them in a safe location in case you need to revert.
+⚠️ **Free Up Space**: The new maps are larger than the originals (more detail, more tags). Remove the old maps from the device before copying the new ones.
 
-⚠️ **Free Up Space**: Remove old maps from your cycle computer before transferring new ones. The new maps are significantly larger due to enhanced tags and more detailed information, so you'll need extra storage space.
+⚠️ **Processing Time**: Generating maps for a whole country can take hours, depending on its size and your computer. Large regions need several GB of memory.
 
-⚠️ **Processing Time**: The map conversion process takes several hours to complete, depending on the size of the regions and your computer's performance. Plan accordingly and let the script run without interruption.
+## Install
 
-### Map Size Changes
+Download the file for your system from the [latest release](https://github.com/fernandoglatz/igpsport-map-updater/releases/latest):
 
-The generated maps are **larger than original IGPSPORT maps** because they include:
-- More detailed road networks
-- Additional map features (waterways, natural features)
-- Enhanced tagging information for better routing
-- Extended geographic data
+| System | Installer | Portable (no install) |
+|--------|-----------|-----------------------|
+| Windows x64 | `.msi` | `.zip` |
+| Linux x64 | `.deb` | `.tar.gz` |
+| macOS Apple Silicon | `.dmg` | `.tar.gz` |
 
-### Tag Configuration
+Java is bundled, so nothing else is needed. The macOS build isn't signed: on first launch, right-click the app and choose **Open**.
 
-This project uses two XML configuration files to control which OpenStreetMap tags are included in the generated maps:
+## How to Use
 
-#### Supported Tags ([tag-igpsport.xml](tag-igpsport.xml))
+1. **Connect the device over USB**, or keep a folder with copies of its original `.map` files. The app scans connected devices automatically; use **Choose folder…** for a folder. The folder the maps were found in is shown under the source. Subfolders named `Backup` are skipped, so old copies kept on the device don't show up.
+2. **Review the matches.** Each map appears with its date (from the file name), the polygon and the OpenStreetMap extract (PBF) the app picked, plus a confidence score. **Check all** / **Uncheck all** select every matched map at once:
+   - `● 100%` / `● from maps.csv`: a confident match, checked by default.
+   - `◐ 88%`: a partial match, unchecked and highlighted. Double-click the row to choose another candidate or type URLs.
+   - `◌ bounding box`: no polygon matched; the map is cut as a rectangle around the original's area. It works, but it also contains a bit of the neighbouring regions.
+
+   ![Review table with the maps of an iGS630S, grouped by country](misc/app-review.png)
+
+   *The 265 maps of an iGS630S, grouped by country. Japanese prefectures match OpenStreetMap boundaries; Honduras and Aichi are partial matches waiting for review.*
+
+   ![Edit dialog listing alternative polygons with their scores](misc/app-edit.png)
+
+   *Double-clicking a row lists the alternatives with their scores, plus the bounding-box and custom-URL options.*
+
+   The **Coverage** tab shows every map on a world map, coloured by status, with a count of maps and countries. Scroll to zoom, drag to move, hover a map for its details, and click it to open its row in **Review**. The background map is built into the app ([Natural Earth](https://www.naturalearthdata.com/), public domain), so it works offline.
+
+   ![Coverage tab: the maps of an iGS630S on a world map](misc/app-coverage.png)
+
+3. **Press Generate.** Downloads, conversion and renaming run one map at a time, with progress, MB/s and a log. **Cancel** stops cleanly.
+4. **Copy the files** from the output folder to the device's `iGPSPORT/Maps/` folder, replacing the old ones.
+
+Confirmed matches are saved to `maps.csv`, so the next run starts from them.
+
+### How matching works
+
+Each original file name contains a GEOCODE (see [below](#igpsport-filename-structure)) that describes the map's area. The app decodes it and compares that area with polygons from three sources, in this order:
+
+1. [openstreetmap.fr polygons](https://download.openstreetmap.fr/polygons/): countries and their regions/states.
+2. [Geofabrik](https://download.geofabrik.de/) region outlines: whole countries and large regions.
+3. OpenStreetMap administrative boundaries (found with the [Overpass API](https://overpass-api.de/), polygons from [polygons.openstreetmap.fr](https://polygons.openstreetmap.fr/)): used only when the first two don't match well, e.g. Japanese prefectures.
+
+The PBF is the smallest Geofabrik extract that covers the chosen polygon. Source listings are cached for 7 days; **Refresh sources** clears the cache.
+
+## Tag Configuration
+
+Two XML files control which OpenStreetMap tags end up in the maps. They're built into the app; a copy of either file in the working folder overrides the built-in one.
+
+### Supported Tags ([tag-igpsport.xml](tag-igpsport.xml))
 
 The following **21 tags** are directly supported by IGPSPORT devices:
 
@@ -66,7 +85,7 @@ The following **21 tags** are directly supported by IGPSPORT devices:
 | **Natural** | coastline, water | 13 |
 | **Waterways** | canal, dam, drain, river, stream | 14 |
 
-#### Tag Transformations ([tag-igpsport-transform.xml](tag-igpsport-transform.xml))
+### Tag Transformations ([tag-igpsport-transform.xml](tag-igpsport-transform.xml))
 
 The following **12 transformations** convert unsupported OSM tags to device-compatible equivalents:
 
@@ -89,108 +108,25 @@ This means the maps effectively support **33 highway types** (21 native + 12 tra
 
 See the [Mapsforge tag-mapping reference](https://github.com/mapsforge/mapsforge/blob/master/mapsforge-map-writer/src/main/config/tag-mapping.xml) for all available OpenStreetMap tags.
 
-## How to Run
+## maps.csv
 
-### Windows
-
-Run the PowerShell script:
-
-```powershell
-.\script.ps1
-```
-
-Or right-click `script.ps1` and select "Run with PowerShell"
-
-### Unix/Linux/macOS
-
-Make the script executable and run it:
-
-```bash
-chmod +x script.sh
-./script.sh
-```
-
-## What the Script Does
-
-1. **Downloads Osmosis** (if not present) - OpenStreetMap data processing tool (v0.49.2)
-2. **Downloads Mapsforge Writer Plugin** (v0.27.0) - Converts OSM data to Mapsforge format
-3. **Reads maps.csv** - Configuration file with region definitions
-4. **Downloads OSM PBF files** - Raw OpenStreetMap data from Geofabrik
-5. **Downloads Polygon files** - Geographic boundary definitions
-6. **Transforms tags** - Converts unsupported OSM tags to device-compatible equivalents
-7. **Generates maps** - Creates Mapsforge `.map` files with proper zoom levels
-8. **Renames output** - Calculates GEOCODE and applies IGPSPORT filename convention
-
-## CSV File Structure
-
-The `maps.csv` file defines which regions to process. It has three columns:
+`maps.csv` stores confirmed matches, one row per map region:
 
 | Column | Description | Example |
 |--------|-------------|---------|
-| **Original filename** | The target IGPSPORT map filename format | `BR01002303102B83FO00N00E.map` |
-| **OSM BPF URL** | URL to download the OpenStreetMap PBF file | `https://download.geofabrik.de/south-america/brazil-latest.osm.pbf` |
-| **Poly URL** | URL to download the polygon boundary file | `https://download.openstreetmap.fr/polygons/south-america/brazil/central-west/distrito-federal.poly` |
+| **Original filename** | The original IGPSPORT map file | `BR01002303102B83FO00N00E.map` |
+| **OSM BPF URL** | OpenStreetMap PBF extract | `https://download.geofabrik.de/south-america/brazil-latest.osm.pbf` |
+| **Poly URL** | Polygon boundary file | `https://download.openstreetmap.fr/polygons/south-america/brazil/central-west/distrito-federal.poly` |
 
-### Example CSV Content
-
-```csv
-Original filename,OSM BPF URL,Poly URL
-BR01002303102B83FO00N00E.map,https://download.geofabrik.de/south-america/brazil-latest.osm.pbf,https://download.openstreetmap.fr/polygons/south-america/brazil/central-west/distrito-federal.poly
-BR02002303102833DN04O04Q.map,https://download.geofabrik.de/south-america/brazil-latest.osm.pbf,https://download.openstreetmap.fr/polygons/south-america/brazil/central-west/goias.poly
-```
-
-### Where to Find Resources
-
-- **OSM PBF files**: [Geofabrik Downloads](https://download.geofabrik.de/)
-- **Polygon files**: [OpenStreetMap Polygons](https://download.openstreetmap.fr/polygons/)
-
-## Directory Structure
-
-```
-igpsport-map-updater/
-├── script.sh                    # Unix/Linux/macOS execution script
-├── script.ps1                   # Windows PowerShell execution script
-├── maps.csv                     # Configuration file with map definitions
-├── tag-igpsport.xml             # Tag configuration for Mapsforge writer
-├── tag-igpsport-transform.xml   # Tag transformation rules
-├── extract_tags.py              # Utility to extract tags from .map files
-├── download/                    # Downloaded OSM PBF and polygon files
-│   ├── *.osm.pbf
-│   └── *.poly
-├── output/                      # Generated map files (final output)
-│   └── *.map
-├── backup/                      # Store original IGPSPORT maps here
-├── tmp/                         # Temporary files during processing
-├── misc/                        # Documentation and diagrams
-│   ├── filename-structure.svg
-│   ├── tile-grid-concept.svg
-│   └── compare-2023-to-2026.jpg
-└── osmosis-0.49.2/              # Osmosis tool (auto-downloaded)
-    ├── bin/
-    ├── lib/
-    └── script/
-```
-
-### Directory Descriptions
-
-- **download/**: Stores downloaded OSM PBF files and polygon boundary files. Files are cached to avoid re-downloading.
-- **output/**: Contains the final generated `.map` files with IGPSPORT-compatible filenames.
-- **backup/**: Recommended location to store your original IGPSPORT maps before replacing them.
-- **tmp/**: Temporary directory used by Osmosis during processing (can be deleted after completion).
-- **misc/**: Contains SVG diagrams explaining the filename structure and tile grid concepts.
-- **osmosis-0.49.2/**: Automatically downloaded and extracted Osmosis tool with Mapsforge plugin.
+Rows are matched by country, region code and GEOCODE, ignoring the date, so a newer or older version of the same map reuses its row. You can edit the file by hand; the app picks up the changes on the next run.
 
 ## IGPSPORT Filename Structure
 
-The generated map files follow a specific naming convention required by IGPSPORT devices:
-
-### Format
+The map files follow a naming convention required by IGPSPORT devices:
 
 ```
 [CC][RRRR][YYMMDD][GEOCODE].map
 ```
-
-### Components
 
 | Component | Length | Description | Example |
 |-----------|--------|-------------|---------|
@@ -198,6 +134,8 @@ The generated map files follow a specific naming convention required by IGPSPORT
 | **RRRR** | 4 digits | Region/Product code | `0100`, `0200` |
 | **YYMMDD** | 6 digits | Date (Year, Month, Day) | `250317` = March 17, 2025 |
 | **GEOCODE** | 12 chars | Geographic boundary encoding | `2B83FO00N00E` |
+
+Generated maps keep the country and region code of the original, use the date of the OpenStreetMap data, and get a GEOCODE computed from the new map's bounding box.
 
 ### GEOCODE Breakdown (12 characters, Base36 encoding)
 
@@ -222,172 +160,89 @@ The GEOCODE consists of 4 parts, each 3 characters in Base36:
 - **00N**: LON_SPAN (width in tiles)
 - **00E**: LAT_SPAN (height in tiles)
 
-For a visual representation of the filename structure, see below:
-
 ![IGPSPORT Filename Structure](misc/filename-structure.svg)
 
 ## Viewing and Comparing Maps
 
-### Cruiser - Map Viewer
+[Cruiser](https://wiki.openstreetmap.org/wiki/Cruiser) is a cross-platform map viewer that opens Mapsforge `.map` files. Use it to check generated maps before copying them to the device, or to compare them with the originals.
 
-[Cruiser](https://wiki.openstreetmap.org/wiki/Cruiser) is a cross-platform map viewer that supports Mapsforge map files, making it ideal for viewing and comparing the generated maps.
-
-#### Features
-- View `.map` files generated by this tool
-- Compare different map versions
-- Test maps before deploying to IGPSPORT devices
-- Supports multiple map formats including Mapsforge
-
-#### Download
-Visit the [Cruiser Wiki page](https://wiki.openstreetmap.org/wiki/Cruiser) for download links and documentation.
-
-#### Usage
-1. Open Cruiser
-2. Load your generated `.map` file from the `output/` directory
-3. Compare with other map versions or sources
-
-#### Comparison Example
-
-Below is a comparison showing the difference between the original IGPSPORT map (left) and the enhanced map (right) with additional features and details:
+Below is a comparison between an original IGPSPORT map (left) and a generated one (right):
 
 ![Map Comparison - Original vs Enhanced](misc/compare-2023-to-2026.jpg)
 
-*Left: Original map (2023) | Right: Enhanced map (2026
+*Left: Original map (2023) | Right: Enhanced map (2026)*
 
 ## Troubleshooting
 
-### Java Not Found
-Ensure Java 17 or higher is installed:
-```bash
-java -version
-```
+### The device isn't found
+- Make sure it's connected as a USB drive and shows up in your file manager, then press **⟳ Rescan**.
+- In a virtual machine, pass the USB device through to the VM.
+- Or copy the original maps to a folder and use **Choose folder…**.
 
-### Out of Memory Errors
-Increase Java heap size by editing the `JAVA_OPTS` variable in the script:
-```bash
-export JAVA_OPTS="-Xms2g -Xmx16g -Djava.io.tmpdir=$TMP_DIR"
-```
+### Out of memory
+Raise **Max memory (GB)** at the bottom of the window. Large countries may need 12–16 GB.
 
-### Download Failures
-- Check your internet connection
-- Verify the URLs in `maps.csv` are accessible
-- Some regions may have updated URLs on Geofabrik
+### "Overpass is busy"
+The OpenStreetMap boundary service is overloaded now and then. The app retries automatically; if it still fails, press **Refresh sources** later.
 
-### Permission Denied (Unix/Linux)
-Make the script executable:
-```bash
-chmod +x script.sh
-```
+### Download failures
+Check your internet connection. If a source URL changed, double-click the row and pick another candidate or type the new URL.
 
 ## Technical Details
 
 ### Processing Pipeline
 
-1. **Read PBF** → Load OpenStreetMap binary data
-2. **Apply Polygon** → Filter data to geographic boundary
-3. **Tag Filter** → Remove unwanted features, keep roads, waterways, landuse
-4. **Used Node** → Keep only referenced nodes
-5. **Merge** → Combine filtered data
-6. **Mapfile Writer** → Generate Mapsforge `.map` file
-7. **Rename** → Calculate GEOCODE and apply IGPSPORT filename
+For each confirmed map:
+
+1. **Download** the PBF extract (reused while it's current; interrupted downloads resume) and the polygon.
+2. **Run osmosis** with the Mapsforge writer plugin:
+   `--read-pbf-fast` → `--bounding-polygon` → `--tag-transform` → `--mapfile-writer type=hd zoom-interval-conf=13,13,13,14,14,14`
+3. **Rename** the result: read the map's bounding box, compute the GEOCODE, and apply the IGPSPORT file name.
 
 ### Map Features Included
 
-The script filters OSM data to include:
 - **Roads**: highways, paths, tracks (with tag transformation for unsupported types)
 - **Waterways**: rivers, streams, canals, dams, drains
 - **Natural features**: water bodies, coastlines
 
-All other features (buildings, POIs, amenities, etc.) are filtered out to reduce file size and focus on navigation.
+Everything else (buildings, POIs, amenities, etc.) is left out to keep files small and focused on navigation.
 
-## Utilities
+## Development
 
-### Map Tag Extractor (extract_tags_map.py)
+The app is a Java 17 + JavaFX Maven project in [app/](app/). Requires JDK 17+ and Maven.
 
-A Python utility to extract and analyze tags from Mapsforge `.map` files. Useful for:
-- Inspecting what tags are embedded in existing maps
-- Comparing tags between different map versions
-- Debugging tag configuration issues
-
-**Usage:**
 ```bash
-# Single file
-python extract_tags_map.py output/map.map
-
-# Single file with output
-python extract_tags_map.py output/map.map tags.txt
-
-# Process all files in folder
-python extract_tags_map.py backup/
-
-# Process folder with output
-python extract_tags_map.py backup/ tags_output/
+mvn -f app/pom.xml javafx:run                                                             # run from source
+mvn -f app/pom.xml test                                                                   # unit tests
+mvn -f app/pom.xml test -Dsurefire.groups=integration -Dsurefire.excludedGroups=           # real osmosis run
 ```
 
-### PBF Tag Extractor (extract_tags_pbf.py)
+When run from this repository, the app uses the repository's `maps.csv`, `download/`, `output/` and `cache/` folders. When installed, it keeps its data in the user data folder (`~/.local/share/igpsport-map-updater` on Linux).
 
-A Python utility to extract and analyze tags from raw OSM PBF files before processing. This tool helps you understand what tags are available in the source data and plan your tag filtering/transformation strategy.
+### Build an installer
 
-**Features:**
-- Extract tags from nodes, ways, and relations separately
-- Display tag frequency statistics
-- Export results in multiple formats (text, JSON, CSV)
-- Process individual files or entire folders
-- Filter by minimum occurrence count
-- Requires either `pyosmium` (faster) or `osmium-tool`
+Build on the target OS (jpackage can't cross-build). Files are written to `app/target/release/`:
 
-**Installation:**
 ```bash
-# Option 1: Install pyosmium (recommended - faster)
-pip install osmium
-
-# Option 2: Install osmium-tool
-# Ubuntu/Debian
-sudo apt-get install osmium-tool
-
-# Fedora
-sudo dnf install osmium-tool
-
-# macOS
-brew install osmium-tool
+app/package.sh                                # Linux .deb; macOS .dmg
+app/package.sh --type deb --type app-image    # several types; app-image is archived as .tar.gz
 ```
 
-**Usage:**
-```bash
-# Single file - display tags in terminal
-python extract_tags_pbf.py download/brazil-latest.osm.pbf
-
-# Single file - export to text file
-python extract_tags_pbf.py download/sao-paulo.pbf -o tags.txt
-
-# Single file - export to JSON
-python extract_tags_pbf.py download/sao-paulo.pbf -o tags.json -f json
-
-# Single file - export to CSV
-python extract_tags_pbf.py download/sao-paulo.pbf -o tags.csv -f csv
-
-# Process all .pbf files in folder
-python extract_tags_pbf.py download/
-
-# Process folder and export each file
-python extract_tags_pbf.py download/ -o output_tags/
-
-# Process with filters
-python extract_tags_pbf.py download/ -o output/ -f json -m 10 -d 100
+```powershell
+.\app\package.ps1                             # Windows .msi (needs the WiX Toolset 3)
+.\app\package.ps1 -Type msi,app-image         # app-image is archived as .zip
 ```
 
-**Options:**
-- `-o, --output`: Output file or folder for extracted tags
-- `-f, --format`: Output format - `text` (default), `json`, or `csv`
-- `-m, --min-count`: Minimum occurrence count to include (default: 1)
-- `-d, --display`: Maximum tags to display in terminal (default: 50)
+### Releases
 
-**Use Cases:**
-- Analyze tag distribution in source OSM data
-- Identify which highway types are present in your region
-- Determine what tags need transformation for IGPSPORT compatibility
-- Compare tag usage across different regions
-- Plan custom tag filtering strategies
+Pushing a version tag builds the installers on Linux, Windows and macOS and publishes them as a GitHub release ([.github/workflows/release.yml](.github/workflows/release.yml)):
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+Tags must look like `v1.2.3`, because installers only accept numeric versions.
 
 ## License
 
@@ -397,6 +252,7 @@ This project is licensed under the **Apache License 2.0** - see the [LICENSE](LI
 - **Osmosis**: LGPL ([GitHub](https://github.com/openstreetmap/osmosis))
 - **Mapsforge**: LGPL ([GitHub](https://github.com/mapsforge/mapsforge))
 - **OpenStreetMap Data**: ODbL ([License](https://www.openstreetmap.org/copyright))
+- **Natural Earth** (coverage base map): public domain ([Terms of use](https://www.naturalearthdata.com/about/terms-of-use/))
 
 ## References
 
@@ -405,6 +261,8 @@ This project is licensed under the **Apache License 2.0** - see the [LICENSE](LI
 - [OpenStreetMap](https://www.openstreetmap.org/)
 - [OpenStreetMap France](https://download.openstreetmap.fr/) - Polygon files
 - [Geofabrik Downloads](https://download.geofabrik.de/) - OSM PBF files
+- [Overpass API](https://overpass-api.de/) - OpenStreetMap boundary lookup
 - [Osmosis Documentation](https://wiki.openstreetmap.org/wiki/Osmosis)
 - [Mapsforge](https://github.com/mapsforge/mapsforge)
 - [Cruiser Map Viewer](https://wiki.openstreetmap.org/wiki/Cruiser)
+- [Natural Earth](https://www.naturalearthdata.com/) - Coverage base map

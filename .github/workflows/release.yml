@@ -1,0 +1,132 @@
+# Builds the desktop app installers and publishes them as a GitHub release.
+# Runs only when a version tag is pushed, e.g.:  git tag v1.2.0 && git push origin v1.2.0
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  integration-test:
+    name: Integration test (real osmosis + Mapsforge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run integration test
+        run: mvn -B -f app/pom.xml test -Dsurefire.groups=integration -Dsurefire.excludedGroups=
+
+  package:
+    name: Package (${{ matrix.platform }})
+    needs: integration-test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: windows-x64
+            os: windows-latest
+          - platform: macos-arm64
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      # jpackage only accepts numeric versions, so tags must look like v1.2.3.
+      - name: Set version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags must look like v1.2.3 (got '$GITHUB_REF_NAME')"
+            exit 1
+          fi
+          mvn -B -q -f app/pom.xml versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+
+      - name: Unit tests
+        run: mvn -B -f app/pom.xml test
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot
+          bash app/package.sh --type deb --type app-image
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: bash app/package.sh --type dmg --type app-image
+
+      # jpackage (JDK 17) builds .msi files with WiX Toolset 3.
+      - name: Ensure WiX Toolset 3 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            $wix = Get-ChildItem "${env:ProgramFiles(x86)}" -Filter "WiX Toolset v3*" -Directory -ErrorAction SilentlyContinue |
+              Sort-Object Name | Select-Object -Last 1
+            if (-not $wix) {
+              choco install wixtoolset --no-progress -y
+              $wix = Get-ChildItem "${env:ProgramFiles(x86)}" -Filter "WiX Toolset v3*" -Directory |
+                Sort-Object Name | Select-Object -Last 1
+            }
+            if (-not $wix) { throw "WiX Toolset 3 not found after installation" }
+            "$($wix.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\app\package.ps1 -Type msi,app-image
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: app/target/release/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l release
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi

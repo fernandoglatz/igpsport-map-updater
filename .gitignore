@@ -1,5 +1,8 @@
-osmosis*
 download
 output
 tmp
 backup
+cache/
+app/target/
+docs/superpowers/
+.superpowers/

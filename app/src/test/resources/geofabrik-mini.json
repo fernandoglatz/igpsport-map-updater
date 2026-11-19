@@ -1,0 +1,290 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "south-america",
+    "name": "South America",
+    "urls": {
+     "pbf": "https://download.geofabrik.de/south-america-latest.osm.pbf"
+    }
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        -90,
+        -60
+       ],
+       [
+        -30,
+        -60
+       ],
+       [
+        -30,
+        15
+       ],
+       [
+        -90,
+        15
+       ],
+       [
+        -90,
+        -60
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "brazil",
+    "name": "Brazil",
+    "urls": {
+     "pbf": "https://download.geofabrik.de/south-america/brazil-latest.osm.pbf"
+    },
+    "parent": "south-america",
+    "iso3166-1:alpha2": [
+     "BR"
+    ]
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        -74,
+        -34
+       ],
+       [
+        -34,
+        -34
+       ],
+       [
+        -34,
+        5
+       ],
+       [
+        -74,
+        5
+       ],
+       [
+        -74,
+        -34
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "centro-oeste",
+    "name": "centro-oeste",
+    "urls": {
+     "pbf": "https://download.geofabrik.de/south-america/brazil/centro-oeste-latest.osm.pbf"
+    },
+    "parent": "brazil"
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        -61,
+        -24
+       ],
+       [
+        -45,
+        -24
+       ],
+       [
+        -45,
+        -7
+       ],
+       [
+        -61,
+        -7
+       ],
+       [
+        -61,
+        -24
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "sudeste",
+    "name": "sudeste",
+    "urls": {
+     "pbf": "https://download.geofabrik.de/south-america/brazil/sudeste-latest.osm.pbf"
+    },
+    "parent": "brazil"
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        -47,
+        -25
+       ],
+       [
+        -39,
+        -25
+       ],
+       [
+        -39,
+        -14
+       ],
+       [
+        -47,
+        -14
+       ],
+       [
+        -47,
+        -25
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "sul",
+    "name": "sul",
+    "urls": {
+     "pbf": "https://download.geofabrik.de/south-america/brazil/sul-latest.osm.pbf"
+    },
+    "parent": "brazil"
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        -58,
+        -34
+       ],
+       [
+        -48,
+        -34
+       ],
+       [
+        -48,
+        -22
+       ],
+       [
+        -58,
+        -22
+       ],
+       [
+        -58,
+        -34
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "united-kingdom",
+    "name": "United Kingdom",
+    "urls": {
+     "pbf": "https://download.geofabrik.de/europe/united-kingdom-latest.osm.pbf"
+    },
+    "parent": "europe",
+    "iso3166-1:alpha2": [
+     "GB"
+    ]
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        -8,
+        50
+       ],
+       [
+        2,
+        50
+       ],
+       [
+        2,
+        60
+       ],
+       [
+        -8,
+        60
+       ],
+       [
+        -8,
+        50
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "nopbf",
+    "name": "x",
+    "iso3166-1:alpha2": [
+     "XY"
+    ],
+    "urls": {}
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        1
+       ],
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

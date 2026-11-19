@@ -1,0 +1,48 @@
+.root {
+    -fx-font-size: 13px;
+}
+
+.hint {
+    -fx-text-fill: derive(-fx-text-base-color, 40%);
+    -fx-font-size: 11px;
+}
+
+.log {
+    -fx-font-family: "monospace";
+    -fx-font-size: 12px;
+}
+
+.confidence-csv,
+.confidence-manual,
+.confidence-high {
+    -fx-text-fill: #1e7b34;
+}
+
+.confidence-medium {
+    -fx-text-fill: #9a6700;
+    -fx-background-color: #fff4d6;
+}
+
+.confidence-low,
+.confidence-fallback {
+    -fx-text-fill: #9a3412;
+    -fx-background-color: #ffe8dc;
+}
+
+.confidence-unmatched {
+    -fx-text-fill: #b42318;
+    -fx-background-color: #fde4e2;
+}
+
+.map-hover {
+    -fx-background-color: rgba(255, 255, 255, 0.95);
+    -fx-border-color: #9a9a9a;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+    -fx-padding: 4 8 4 8;
+    -fx-font-size: 12px;
+}
+
+.folder-path {
+    -fx-text-fill: derive(-fx-text-base-color, 25%);
+}
