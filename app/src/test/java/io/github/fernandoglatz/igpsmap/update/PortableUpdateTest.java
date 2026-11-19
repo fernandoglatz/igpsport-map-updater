@@ -111,11 +111,16 @@ class PortableUpdateTest {
 
     @Test
     void buildsTheHelperCommandForEachPlatform() {
-        PortableApp linux = new PortableApp(Path.of("/a/app"), Path.of("/a/app/bin/x"), LINUX);
-        assertEquals(List.of("nohup", "/bin/sh", "/u/replace-app.sh", "42", "/a/app", "/a/.app.update/x", "/a/app/bin/x",
-                        "/a/.app.update"),
-                PortableUpdate.helperCommand(linux, Path.of("/u/replace-app.sh"), 42, Path.of("/a/.app.update/x"),
-                        Path.of("/a/.app.update")));
+        // Expected paths go through Path like the code does: the build also runs on Windows ("\\a\\app").
+        Path root = Path.of("/a/app");
+        Path launcher = Path.of("/a/app/bin/x");
+        Path script = Path.of("/u/replace-app.sh");
+        Path newRoot = Path.of("/a/.app.update/x");
+        Path staging = Path.of("/a/.app.update");
+        PortableApp linux = new PortableApp(root, launcher, LINUX);
+        assertEquals(List.of("nohup", "/bin/sh", script.toString(), "42", root.toString(), newRoot.toString(),
+                        launcher.toString(), staging.toString()),
+                PortableUpdate.helperCommand(linux, script, 42, newRoot, staging));
         PortableApp windows = new PortableApp(Path.of("C:/apps/app"), Path.of("C:/apps/app/x.exe"), WINDOWS);
         List<String> command = PortableUpdate.helperCommand(windows, Path.of("C:/u/replace-app.ps1"), 42,
                 Path.of("C:/apps/.app.update/app"), Path.of("C:/apps/.app.update"));
