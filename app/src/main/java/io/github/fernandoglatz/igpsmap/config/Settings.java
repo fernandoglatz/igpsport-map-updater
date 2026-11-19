@@ -9,15 +9,23 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Properties;
 
-/** User preferences. {@code lastSourceFolder} may be null. */
-public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cacheMaxAge, Path lastSourceFolder) {
+/**
+ * User preferences. {@code threads} and {@code maxHeapGb} are {@link #AUTO} (0) when the writer tunes
+ * them from the PBF size and installed memory. {@code lastSourceFolder} and {@code lastProduct} (a
+ * {@code Product} enum name) may be null.
+ */
+public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cacheMaxAge, Path lastSourceFolder,
+                       boolean hdFallback, String lastProduct) {
 
-    private static final int DEFAULT_THREADS = 4;
-    private static final int DEFAULT_HEAP_GB = 8;
+    /** Value of {@code threads} / {@code maxHeapGb} meaning "choose automatically". */
+    public static final int AUTO = 0;
+    private static final String AUTO_KEYWORD = "auto";
     private static final int DEFAULT_CACHE_DAYS = 7;
+    /** Retry a failed in-memory run in disk mode unless the user turned it off. */
+    private static final boolean DEFAULT_HD_FALLBACK = true;
 
     public static Settings defaults(AppPaths paths) {
-        return new Settings(paths.output(), DEFAULT_THREADS, DEFAULT_HEAP_GB, Duration.ofDays(DEFAULT_CACHE_DAYS), null);
+        return new Settings(paths.output(), AUTO, AUTO, Duration.ofDays(DEFAULT_CACHE_DAYS), null, DEFAULT_HD_FALLBACK, null);
     }
 
     public static Settings load(Path file, AppPaths paths) {
@@ -33,22 +41,29 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
         }
         String output = p.getProperty("outputDir");
         String last = p.getProperty("lastSourceFolder");
+        String product = p.getProperty("lastProduct");
         return new Settings(
                 pathOr(output, defaults.outputDir()),
-                positiveInt(p.getProperty("threads"), DEFAULT_THREADS),
-                positiveInt(p.getProperty("maxHeapGb"), DEFAULT_HEAP_GB),
+                autoOrPositive(p.getProperty("threads")),
+                autoOrPositive(p.getProperty("maxHeapGb")),
                 Duration.ofDays(positiveInt(p.getProperty("cacheMaxAgeDays"), DEFAULT_CACHE_DAYS)),
-                pathOr(last, null));
+                pathOr(last, null),
+                booleanOr(p.getProperty("hdFallback"), DEFAULT_HD_FALLBACK),
+                product == null || product.isBlank() ? null : product.trim());
     }
 
     public void save(Path file) throws IOException {
         Properties p = new Properties();
         p.setProperty("outputDir", outputDir.toString());
-        p.setProperty("threads", Integer.toString(threads));
-        p.setProperty("maxHeapGb", Integer.toString(maxHeapGb));
+        p.setProperty("threads", autoText(threads));
+        p.setProperty("maxHeapGb", autoText(maxHeapGb));
         p.setProperty("cacheMaxAgeDays", Long.toString(cacheMaxAge.toDays()));
+        p.setProperty("hdFallback", Boolean.toString(hdFallback));
         if (lastSourceFolder != null) {
             p.setProperty("lastSourceFolder", lastSourceFolder.toString());
+        }
+        if (lastProduct != null) {
+            p.setProperty("lastProduct", lastProduct);
         }
         Files.createDirectories(file.toAbsolutePath().getParent());
         try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.ISO_8859_1)) {
@@ -57,7 +72,30 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
     }
 
     public Settings withLastSourceFolder(Path folder) {
-        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, folder);
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, folder, hdFallback, lastProduct);
+    }
+
+    public Settings withLastProduct(String product) {
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, product);
+    }
+
+    private static boolean booleanOr(String value, boolean fallback) {
+        if (value == null || !(value.trim().equalsIgnoreCase("true") || value.trim().equalsIgnoreCase("false"))) {
+            return fallback;
+        }
+        return Boolean.parseBoolean(value.trim());
+    }
+
+    private static String autoText(int value) {
+        return value > 0 ? Integer.toString(value) : AUTO_KEYWORD;
+    }
+
+    /** A positive number, or AUTO for "auto", missing or invalid values. */
+    private static int autoOrPositive(String value) {
+        if (value == null || value.trim().equalsIgnoreCase(AUTO_KEYWORD)) {
+            return AUTO;
+        }
+        return positiveInt(value, AUTO);
     }
 
     private static Path pathOr(String value, Path fallback) {

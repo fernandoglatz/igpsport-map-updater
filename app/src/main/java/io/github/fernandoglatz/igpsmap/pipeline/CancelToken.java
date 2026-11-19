@@ -22,14 +22,14 @@ public final class CancelToken {
         return cancelled;
     }
 
-    void bind(Thread thread) {
+    public void bind(Thread thread) {
         worker = thread;
         if (cancelled) {
             thread.interrupt();
         }
     }
 
-    void unbind() {
+    public void unbind() {
         worker = null;
     }
 }

@@ -1,7 +1,9 @@
 package io.github.fernandoglatz.igpsmap.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,18 +26,68 @@ class SettingsTest {
     void defaults() {
         Settings s = Settings.defaults(paths());
         assertEquals(paths().output(), s.outputDir());
-        assertEquals(4, s.threads());
-        assertEquals(8, s.maxHeapGb());
+        assertEquals(Settings.AUTO, s.threads());
+        assertEquals(Settings.AUTO, s.maxHeapGb());
         assertEquals(Duration.ofDays(7), s.cacheMaxAge());
         assertNull(s.lastSourceFolder());
+        assertTrue(s.hdFallback());
+        assertNull(s.lastProduct());
     }
 
     @Test
     void roundTrips() throws IOException {
         Path file = dir.resolve("cfg/settings.properties");
-        Settings s = new Settings(dir.resolve("out"), 6, 12, Duration.ofDays(3), dir.resolve("backup"));
+        Settings s = new Settings(dir.resolve("out"), 6, 12, Duration.ofDays(3), dir.resolve("backup"), true, "IGS630S");
         s.save(file);
         assertEquals(s, Settings.load(file, paths()));
+    }
+
+    @Test
+    void roundTripsAutoValues() throws IOException {
+        Path file = dir.resolve("cfg/auto.properties");
+        Settings s = new Settings(dir.resolve("out"), Settings.AUTO, Settings.AUTO, Duration.ofDays(7), null, false, null);
+        s.save(file);
+        assertTrue(Files.readString(file).contains("threads=auto"));
+        assertTrue(Files.readString(file).contains("maxHeapGb=auto"));
+        assertEquals(s, Settings.load(file, paths()));
+    }
+
+    @Test
+    void v1SettingsFileLoadsUnchanged() throws IOException {
+        Path file = dir.resolve("v1.properties");
+        Files.writeString(file, "outputDir=" + dir.resolve("out").toString().replace("\\", "\\\\")
+                + "\nthreads=6\nmaxHeapGb=12\ncacheMaxAgeDays=7\n");
+        Settings s = Settings.load(file, paths());
+        assertEquals(6, s.threads());
+        assertEquals(12, s.maxHeapGb());
+        assertTrue(s.hdFallback(), "files saved before the option existed get the default (on)");
+        assertNull(s.lastProduct());
+    }
+
+    @Test
+    void disabledRetryIsKept() throws IOException {
+        Path file = dir.resolve("off.properties");
+        Settings s = new Settings(dir.resolve("out"), Settings.AUTO, Settings.AUTO, Duration.ofDays(7), null, false, null);
+        s.save(file);
+        assertFalse(Settings.load(file, paths()).hdFallback());
+    }
+
+    @Test
+    void autoKeywordIsCaseInsensitive() throws IOException {
+        Path file = dir.resolve("a.properties");
+        Files.writeString(file, "threads=AUTO\nmaxHeapGb= Auto \nhdFallback=TRUE\nlastProduct=BINAVI\n");
+        Settings s = Settings.load(file, paths());
+        assertEquals(Settings.AUTO, s.threads());
+        assertEquals(Settings.AUTO, s.maxHeapGb());
+        assertTrue(s.hdFallback());
+        assertEquals("BINAVI", s.lastProduct());
+    }
+
+    @Test
+    void withersKeepTheOtherFields() {
+        Settings s = new Settings(dir, 3, 5, Duration.ofDays(1), null, true, "IGS800");
+        assertEquals(new Settings(dir, 3, 5, Duration.ofDays(1), dir, true, "IGS800"), s.withLastSourceFolder(dir));
+        assertEquals(new Settings(dir, 3, 5, Duration.ofDays(1), null, true, "BSC300"), s.withLastProduct("BSC300"));
     }
 
     @Test
@@ -61,8 +113,8 @@ class SettingsTest {
         Path file = dir.resolve("s.properties");
         Files.writeString(file, "threads=abc\nmaxHeapGb=0\ncacheMaxAgeDays=2\n");
         Settings s = Settings.load(file, paths());
-        assertEquals(4, s.threads());
-        assertEquals(8, s.maxHeapGb());
+        assertEquals(Settings.AUTO, s.threads());
+        assertEquals(Settings.AUTO, s.maxHeapGb());
         assertEquals(Duration.ofDays(2), s.cacheMaxAge());
     }
 }

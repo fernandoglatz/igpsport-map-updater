@@ -143,6 +143,50 @@ public final class HttpFetcher {
         Files.deleteIfExists(validatorFile);
     }
 
+    /**
+     * Result of a range request. {@code partial} is false when the server ignored the range and sent
+     * the whole file, which is then in {@code body}.
+     */
+    public record RangeResult(byte[] body, long totalSize, boolean partial) {
+    }
+
+    /** GET with {@code Range: bytes=<spec>}, e.g. {@code "-65536"} (last bytes) or {@code "100-199"}. */
+    public RangeResult readRange(URI uri, String spec) throws IOException {
+        HttpResponse<byte[]> response = send(request(uri).GET().header("Range", "bytes=" + spec).build(),
+                HttpResponse.BodyHandlers.ofByteArray());
+        requireSuccess(uri, response.statusCode());
+        byte[] body = response.body();
+        if (response.statusCode() != 206) {
+            return new RangeResult(body, body.length, false);
+        }
+        return new RangeResult(body, totalFromContentRange(uri, response.headers().firstValue("Content-Range")), true);
+    }
+
+    /** Streams bytes {@code from..toInclusive}; fails unless the server answers with that range (206). */
+    public InputStream openRange(URI uri, long from, long toInclusive) throws IOException {
+        HttpResponse<InputStream> response = send(
+                request(uri).GET().header("Range", "bytes=" + from + "-" + toInclusive).build(),
+                HttpResponse.BodyHandlers.ofInputStream());
+        int status = response.statusCode();
+        if (status != 206) {
+            response.body().close();
+            requireSuccess(uri, status);
+            throw new IOException("Server ignored the byte range request for " + uri);
+        }
+        return response.body();
+    }
+
+    private static long totalFromContentRange(URI uri, Optional<String> header) throws IOException {
+        // Content-Range: bytes 900-999/1000
+        String value = header.orElseThrow(() -> new IOException("Missing Content-Range from " + uri));
+        int slash = value.lastIndexOf('/');
+        try {
+            return Long.parseLong(value.substring(slash + 1).trim());
+        } catch (NumberFormatException | StringIndexOutOfBoundsException e) {
+            throw new IOException("Unknown total size in Content-Range '" + value + "' from " + uri, e);
+        }
+    }
+
     private HttpRequest.Builder request(URI uri) {
         return HttpRequest.newBuilder(uri).timeout(timeout).header("User-Agent", userAgent);
     }

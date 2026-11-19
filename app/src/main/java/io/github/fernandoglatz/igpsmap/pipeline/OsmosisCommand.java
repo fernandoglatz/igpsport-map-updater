@@ -12,16 +12,17 @@ public final class OsmosisCommand {
     private OsmosisCommand() {
     }
 
-    public static List<String> build(Path javaExe, String classpath, int maxHeapGb, int threads, Path tmpDir,
+    public static List<String> build(Path javaExe, String classpath, WriterPlan plan, Path tmpDir,
                                      Path pbf, Path poly, TagFiles tags, Path out) {
         return List.of(
-                javaExe.toString(), "-Xms1g", "-Xmx" + maxHeapGb + "g", "-Djava.io.tmpdir=" + tmpDir,
+                javaExe.toString(), "-Xms" + plan.xmsMb() + "m", "-Xmx" + plan.xmxMb() + "m",
+                "-Djava.io.tmpdir=" + tmpDir,
                 "-cp", classpath, MAIN_CLASS,
                 "--read-pbf-fast", "file=" + pbf,
                 "--bounding-polygon", "file=" + poly,
                 "--tag-transform", "file=" + tags.transform(),
-                "--mapfile-writer", "file=" + out, "type=hd",
-                "zoom-interval-conf=13,13,13,14,14,14", "threads=" + threads,
+                "--mapfile-writer", "file=" + out, "type=" + plan.type(),
+                "zoom-interval-conf=13,13,13,14,14,14", "threads=" + plan.threads(),
                 "tag-conf-file=" + tags.tagConf());
     }
 

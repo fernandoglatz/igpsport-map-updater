@@ -142,4 +142,56 @@ class DeviceScannerTest {
         assertEquals("IGS630 — 2 maps", sources.get(0).label());
         assertEquals(2, sources.get(0).maps().size());
     }
+
+    private Path mount(String label) {
+        return dir.resolve("media/rider").resolve(label);
+    }
+
+    @Test
+    void deviceWithANewerMapFormatIsReportedAsUnsupported() throws IOException {
+        touch(mount("BINAVI").resolve("iGPSPORT/Maps/055/T18554.imap"));
+
+        List<UnsupportedDevice> found = linuxScanner().detectUnsupported();
+
+        assertEquals(1, found.size());
+        assertEquals(mount("BINAVI"), found.get(0).root());
+        assertEquals("BINAVI: its maps use a newer format (.imap, e.g. BiNavi Ultra) that this app can't generate.",
+                found.get(0).message());
+    }
+
+    @Test
+    void binaviUltraIsUnsupportedByName() throws IOException {
+        Files.createDirectories(mount("BiNavi Ultra"));
+        assertEquals("BiNavi Ultra: its maps use a newer format (.imap, e.g. BiNavi Ultra) that this app can't generate.",
+                linuxScanner().detectUnsupported().get(0).message());
+    }
+
+    @Test
+    void supportedModelWithoutMapsPointsToAddMaps() throws IOException {
+        Files.createDirectories(mount("IGS630S").resolve("iGPSPORT/Maps"));
+        assertEquals("IGS630S (iGS630S): no IGPSPORT .map files on it. Use Add maps… to download the official ones.",
+                linuxScanner().detectUnsupported().get(0).message());
+    }
+
+    @Test
+    void otherIgpsportDevicesListTheSupportedModels() throws IOException {
+        touch(mount("WATCH").resolve("igpsport/Activities/1.fit"));
+        assertEquals("WATCH: this iGPSPORT device has no maps this app can update. Supported: iGS630, BSC300, "
+                + "BSC300T, iGS630S, iGS800, BSC500, BiNavi, BiNavi Air.",
+                linuxScanner().detectUnsupported().get(0).message());
+    }
+
+    @Test
+    void ordinaryDrivesAreNotSearchedForImapFiles() throws IOException {
+        // Only drives that look like iGPSPORT devices are searched, so a big external disk stays fast.
+        touch(mount("BACKUP-DISK").resolve("old/tiles/T1.imap"));
+        assertEquals(List.of(), linuxScanner().detectUnsupported());
+    }
+
+    @Test
+    void devicesWithMapsAndOrdinaryDrivesAreNotReported() throws IOException {
+        touch(mount("IGS630S").resolve("iGPSPORT/Maps/" + DF));
+        touch(mount("USB-STICK").resolve("photos/a.jpg"));
+        assertEquals(List.of(), linuxScanner().detectUnsupported());
+    }
 }

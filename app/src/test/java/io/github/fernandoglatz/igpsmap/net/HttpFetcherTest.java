@@ -217,4 +217,52 @@ class HttpFetcherTest {
         server.handle("/x", ex -> StubServer.send(ex, 500, new byte[0]));
         assertTrue(fetcher.lastModified(server.uri("/x")).isEmpty());
     }
+
+    @Test
+    void readRangeReturnsTheSuffixAndTheTotalSize() throws IOException {
+        server.handle("/z", ex -> StubServer.sendRange(ex, BODY));
+        HttpFetcher.RangeResult r = fetcher.readRange(server.uri("/z"), "-100");
+        assertTrue(r.partial());
+        assertEquals(1000, r.totalSize());
+        assertArrayEquals(Arrays.copyOfRange(BODY, 900, 1000), r.body());
+        assertEquals("bytes=-100", server.requests.get(0).range());
+    }
+
+    @Test
+    void readRangeReturnsAnExplicitSlice() throws IOException {
+        server.handle("/z", ex -> StubServer.sendRange(ex, BODY));
+        HttpFetcher.RangeResult r = fetcher.readRange(server.uri("/z"), "10-19");
+        assertArrayEquals(Arrays.copyOfRange(BODY, 10, 20), r.body());
+        assertEquals(1000, r.totalSize());
+    }
+
+    @Test
+    void readRangeReportsServersThatIgnoreRanges() throws IOException {
+        server.handle("/z", ex -> StubServer.send(ex, 200, BODY));
+        HttpFetcher.RangeResult r = fetcher.readRange(server.uri("/z"), "-100");
+        assertFalse(r.partial());
+        assertEquals(1000, r.totalSize());
+        assertArrayEquals(BODY, r.body());
+    }
+
+    @Test
+    void readRangeFailsOnHttpErrors() {
+        server.handle("/z", ex -> StubServer.send(ex, 404, new byte[0]));
+        assertThrows(HttpStatusException.class, () -> fetcher.readRange(server.uri("/z"), "-100"));
+    }
+
+    @Test
+    void openRangeStreamsTheSlice() throws IOException {
+        server.handle("/z", ex -> StubServer.sendRange(ex, BODY));
+        try (java.io.InputStream in = fetcher.openRange(server.uri("/z"), 500, 599)) {
+            assertArrayEquals(Arrays.copyOfRange(BODY, 500, 600), in.readAllBytes());
+        }
+        assertEquals("bytes=500-599", server.requests.get(0).range());
+    }
+
+    @Test
+    void openRangeRejectsAFullResponse() {
+        server.handle("/z", ex -> StubServer.send(ex, 200, BODY));
+        assertThrows(IOException.class, () -> fetcher.openRange(server.uri("/z"), 500, 599).close());
+    }
 }

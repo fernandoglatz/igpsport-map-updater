@@ -1,0 +1,13 @@
+{"code":0,"message":"","data":[
+  {"id":"eu","name":"europe","continent":"","parentId":"","sort":3,"mapSize":0,"mapVersion":"","mapPathUrl":"","subList":[
+    {"id":"pt","name":"Portugal","parentId":"eu","sort":2,"mapSize":52000000,"mapVersion":"20260420","mapPathUrl":"https://cdn.example/Mapinfo/V1/PT0000.zip","subList":[]}
+  ]},
+  {"id":"sa","name":"south-america","continent":"","parentId":"","sort":6,"mapSize":0,"mapVersion":"","mapPathUrl":null,"subList":[
+    {"id":"br","name":"Brazil","parentId":"sa","sort":1,"mapSize":0,"mapVersion":"","mapPathUrl":"","subList":[
+      {"id":"br-sp","name":"São Paulo","parentId":"br","sort":2,"mapSize":34000000,"mapVersion":"20260420","mapPathUrl":"https://cdn.example/Mapinfo/V1/BR2500.zip","subList":null},
+      {"id":"br-df","name":"Distrito Federal","parentId":"br","sort":1,"mapSize":4000000,"mapVersion":"20260420","mapPathUrl":"https://cdn.example/Mapinfo/V1/BR0100.zip","subList":[]}
+    ]},
+    {"id":"tt","name":"Trinidad and Tobago","parentId":"sa","sort":9,"mapSize":3000000,"mapVersion":"2309","mapPathUrl":"https://cdn.example/Mapinfo\\south-america\\TT000023090922I2YE016014.map","subList":[]},
+    {"id":"az","name":"Azerbaijan","parentId":"sa","sort":3,"mapSize":26000000,"mapVersion":"2611","mapPathUrl":"https://cdn.example/3ba56f27-bd9f-45b8-85c3-72de4a1a7069","subList":[]}
+  ]}
+]}

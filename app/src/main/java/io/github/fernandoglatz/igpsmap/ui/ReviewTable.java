@@ -30,7 +30,7 @@ final class ReviewTable extends TreeTableView<JobRow> {
         setShowRoot(false);
         setEditable(true);
         setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        setPlaceholder(new javafx.scene.control.Label("Pick a device or folder with IGPSPORT .map files."));
+        setPlaceholder(new javafx.scene.control.Label("Pick a device or folder with IGPSPORT .map files, or press Add maps… to download official ones."));
 
         TreeTableColumn<JobRow, Boolean> check = new TreeTableColumn<>("");
         check.setCellValueFactory(c -> c.getValue().getValue().selected);
@@ -92,15 +92,38 @@ final class ReviewTable extends TreeTableView<JobRow> {
     }
 
     void setJobs(List<MapJob> jobs) {
+        fill(jobs, List.of());
+    }
+
+    /** Appends jobs (e.g. maps added from the official catalog); existing rows keep their check state. */
+    void addJobs(List<MapJob> added) {
+        List<MapJob> jobs = new ArrayList<>();
+        List<Boolean> selection = new ArrayList<>();
+        for (TreeItem<JobRow> group : rootItem.getChildren()) {
+            for (TreeItem<JobRow> child : group.getChildren()) {
+                jobs.add(child.getValue().job.get());
+                selection.add(child.getValue().selected.get());
+            }
+        }
+        jobs.addAll(added);
+        fill(jobs, selection);
+    }
+
+    /** Rebuilds the tree; {@code selection} overrides the default check state of the first rows. */
+    private void fill(List<MapJob> jobs, List<Boolean> selection) {
         rootItem.getChildren().clear();
         Map<String, TreeItem<JobRow>> groups = new LinkedHashMap<>();
-        for (MapJob job : jobs) {
+        for (int i = 0; i < jobs.size(); i++) {
+            MapJob job = jobs.get(i);
             TreeItem<JobRow> group = groups.computeIfAbsent(job.map().name().countryCode(), cc -> {
                 TreeItem<JobRow> g = new TreeItem<>(JobRow.group(cc));
                 g.setExpanded(true);
                 return g;
             });
             JobRow row = JobRow.job(job);
+            if (i < selection.size()) {
+                row.selected.set(selection.get(i) && job.runnable());
+            }
             row.selected.addListener((obs, was, now) -> {
                 if (bulkUpdate) {
                     return; // setAllSelected syncs and notifies once at the end

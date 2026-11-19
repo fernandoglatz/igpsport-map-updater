@@ -1,9 +1,11 @@
 package io.github.fernandoglatz.igpsmap.ui;
 
+import io.github.fernandoglatz.igpsmap.catalog.Product;
 import io.github.fernandoglatz.igpsmap.config.Settings;
 import io.github.fernandoglatz.igpsmap.device.DetectedMap;
 import io.github.fernandoglatz.igpsmap.device.DetectedSource;
 import io.github.fernandoglatz.igpsmap.device.DeviceScanner;
+import io.github.fernandoglatz.igpsmap.device.UnsupportedDevice;
 import io.github.fernandoglatz.igpsmap.matching.MapJob;
 import io.github.fernandoglatz.igpsmap.pipeline.CancelToken;
 import io.github.fernandoglatz.igpsmap.pipeline.JobResult;
@@ -11,6 +13,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -19,10 +22,10 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
-import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -49,8 +52,9 @@ public final class MainApp extends Application {
     private final Button openFolder = new Button("Open folder");
     private final ProgressBar busy = new ProgressBar();
     private final TextField outputDir = new TextField();
-    private final Spinner<Integer> threads = new Spinner<>(1, 16, 4);
-    private final Spinner<Integer> heap = new Spinner<>(2, 64, 8);
+    private final ComboBox<Integer> threads = autoCombo(1, 16, "");
+    private final ComboBox<Integer> heap = autoCombo(2, 64, " GB");
+    private final CheckBox hdFallback = new CheckBox("Retry in disk mode if memory runs out");
     private final Button generate = new Button("Generate");
     private final Button edit = new Button("Edit match…");
     private final StackPane center = new StackPane();
@@ -65,8 +69,9 @@ public final class MainApp extends Application {
         controller = AppController.createDefault(Path.of("").toAbsolutePath());
         Settings settings = controller.settings();
         outputDir.setText(PathText.display(settings.outputDir(), PathText.home()));
-        threads.getValueFactory().setValue(settings.threads());
-        heap.getValueFactory().setValue(settings.maxHeapGb());
+        selectAutoValue(threads, settings.threads());
+        selectAutoValue(heap, settings.maxHeapGb());
+        hdFallback.setSelected(settings.hdFallback());
 
         javafx.scene.control.Tab reviewTab = new javafx.scene.control.Tab("Review", reviewContent());
         javafx.scene.control.Tab coverageTab = new javafx.scene.control.Tab("Coverage", coverage);
@@ -98,6 +103,7 @@ public final class MainApp extends Application {
         Scene scene = new Scene(center, 1100, 700);
         scene.getStylesheets().add(MainApp.class.getResource("/ui/app.css").toExternalForm());
         stage.setTitle("IGPSPORT Map Updater");
+        stage.getIcons().setAll(AppIcon.images());
         stage.setScene(scene);
         stage.show();
         updateGenerateButton();
@@ -186,7 +192,11 @@ public final class MainApp extends Application {
         Button uncheckAll = new Button("Uncheck all");
         uncheckAll.setOnAction(e -> table.setAllSelected(false));
         edit.setOnAction(e -> table.editSelected());
-        HBox toolbar = new HBox(8, checkAll, uncheckAll, edit);
+        Button addMaps = new Button("Add maps…");
+        addMaps.setTooltip(new javafx.scene.control.Tooltip(
+                "Download original maps from the official iGPSPORT catalog, e.g. regions not on the device"));
+        addMaps.setOnAction(e -> openAddMaps());
+        HBox toolbar = new HBox(8, checkAll, uncheckAll, edit, addMaps);
         toolbar.setAlignment(Pos.CENTER_LEFT);
         toolbar.setPadding(new Insets(6, 8, 6, 8));
         return new BorderPane(table, toolbar, null, null, null);
@@ -202,8 +212,11 @@ public final class MainApp extends Application {
                 outputDir.setText(PathText.display(dir.toPath(), PathText.home()));
             }
         });
-        threads.setPrefWidth(80);
-        heap.setPrefWidth(80);
+        threads.setMinWidth(Region.USE_PREF_SIZE);
+        heap.setMinWidth(Region.USE_PREF_SIZE);
+        hdFallback.setMinWidth(Region.USE_PREF_SIZE);
+        hdFallback.setTooltip(new javafx.scene.control.Tooltip(
+                "If the fast in-memory writer fails (e.g. out of memory), run it again in the slower disk mode"));
 
         generate.setDefaultButton(true);
         generate.setOnAction(e -> startGeneration());
@@ -212,11 +225,12 @@ public final class MainApp extends Application {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.SOMETIMES);
         HBox row = new HBox(8, new Label("Output:"), outputDir, browse, new Label("Threads"), threads,
-                new Label("Max memory (GB)"), heap, spacer, generate);
+                new Label("Max memory"), heap, hdFallback, spacer, generate);
         row.setAlignment(Pos.CENTER_LEFT);
         keepPreferredWidth(row);
         Label hint = new Label("Rows matched with high confidence or from maps.csv start checked. "
-                + "Double-click a row to change its polygon or PBF. Java must have enough memory for large regions.");
+                + "Double-click a row to change its polygon or PBF. Auto picks threads and memory from each "
+                + "extract's size and your installed RAM.");
         hint.getStyleClass().add("hint");
         VBox box = new VBox(6, row, hint);
         box.setPadding(new Insets(8, 12, 10, 12));
@@ -226,23 +240,40 @@ public final class MainApp extends Application {
     /** Buttons, labels and spinners never shrink below their text; only fields and the combo grow/shrink. */
     private static void keepPreferredWidth(HBox row) {
         for (javafx.scene.Node node : row.getChildren()) {
-            if (node instanceof Button || node instanceof Label || node instanceof Spinner) {
+            if (node instanceof Button || node instanceof Label) {
                 ((Region) node).setMinWidth(Region.USE_PREF_SIZE);
             }
         }
     }
 
+    /** Devices with maps, plus connected iGPSPORT devices this app cannot update. */
+    private record Detection(List<DetectedSource> found, List<UnsupportedDevice> unsupported) {
+    }
+
     private void detectDevices() {
-        run("Looking for IGPSPORT devices…", controller::detect, found -> {
+        run("Looking for IGPSPORT devices…", () -> new Detection(controller.detect(), controller.detectUnsupported()),
+                detection -> {
+            List<DetectedSource> found = detection.found();
             sources.getItems().setAll(found);
             if (found.isEmpty()) {
                 Path last = controller.settings().lastSourceFolder();
-                status.setText("No device with IGPSPORT maps found. Plug it in and rescan, or choose a folder.");
+                status.setText(detection.unsupported().isEmpty()
+                        ? "No device with IGPSPORT maps found. Plug it in and rescan, or choose a folder."
+                        : "Connected device not supported: " + detection.unsupported().get(0).message());
                 if (last != null && Files.isDirectory(last)) {
                     loadFolder(last);
                 }
             } else {
                 sources.getSelectionModel().select(0);
+            }
+            if (!detection.unsupported().isEmpty()) {
+                List<String> messages = detection.unsupported().stream().map(UnsupportedDevice::message).toList();
+                Alert alert = new Alert(Alert.AlertType.WARNING, String.join("\n\n", messages));
+                alert.initOwner(stage);
+                alert.setHeaderText(messages.size() == 1 ? "Connected device not supported"
+                        : messages.size() + " connected devices not supported");
+                alert.setResizable(true);
+                alert.show();
             }
         });
     }
@@ -298,6 +329,84 @@ public final class MainApp extends Application {
         });
     }
 
+    /** Opens the official catalog; downloaded maps are matched and appended to the review list. */
+    private void openAddMaps() {
+        List<DetectedMap> inList = table.allJobs().stream().map(MapJob::map).toList();
+        Optional<Product> preselected = controller.preselectProduct(sources.getValue());
+        new AddMapsDialog(stage, controller, preselected, inList).showAndWait().ifPresent(outcome -> {
+            controller.updateSettings(controller.settings().withLastProduct(outcome.product().name()));
+            List<DetectedMap> added = AppController.toDetected(outcome.maps(), table.allJobs().stream().map(MapJob::map).toList());
+            if (!outcome.errors().isEmpty()) {
+                Alert alert = new Alert(Alert.AlertType.WARNING, String.join("\n", outcome.errors()));
+                alert.initOwner(stage);
+                alert.setHeaderText(outcome.errors().size() + " of the selected entries could not be added");
+                alert.show();
+            }
+            if (added.isEmpty()) {
+                status.setText(outcome.maps().isEmpty() ? "No maps were added."
+                        : "The downloaded maps are already in the list.");
+                return;
+            }
+            appendMaps(added);
+        });
+    }
+
+    private void appendMaps(List<DetectedMap> maps) {
+        int request = matchRequest; // a source change meanwhile replaces the list; drop this result then
+        Task<List<MapJob>> task = new Task<>() {
+            @Override
+            protected List<MapJob> call() throws Exception {
+                return controller.match(maps, p -> updateProgress(p, 1.0));
+            }
+        };
+        busy.progressProperty().bind(task.progressProperty());
+        runTask("Matching " + maps.size() + " official maps to OpenStreetMap regions…", task, jobs -> {
+            busy.progressProperty().unbind();
+            if (request != matchRequest) {
+                return;
+            }
+            List<MapJob> fresh = AppController.newJobs(table.allJobs(), jobs);
+            table.addJobs(fresh);
+            long unmatched = fresh.stream().filter(j -> !j.runnable()).count();
+            status.setText("Added " + fresh.size() + (fresh.size() == 1 ? " official map" : " official maps")
+                    + (unmatched > 0 ? ", " + unmatched + " unmatched" : "") + ". Review and press Generate.");
+        });
+    }
+
+    private static ComboBox<Integer> autoCombo(int min, int max, String unit) {
+        ComboBox<Integer> box = new ComboBox<>();
+        box.getItems().add(Settings.AUTO);
+        for (int i = min; i <= max; i++) {
+            box.getItems().add(i);
+        }
+        box.setConverter(new javafx.util.StringConverter<>() {
+            @Override
+            public String toString(Integer value) {
+                return value == null || value == Settings.AUTO ? "Auto" : value + unit;
+            }
+
+            @Override
+            public Integer fromString(String text) {
+                return null;
+            }
+        });
+        box.setVisibleRowCount(12);
+        box.getSelectionModel().select(0);
+        return box;
+    }
+
+    /** Selects {@code value}, adding it when it is outside the list (e.g. 96 GB typed in the settings file). */
+    private static void selectAutoValue(ComboBox<Integer> box, int value) {
+        if (!box.getItems().contains(value)) {
+            box.getItems().add(value);
+        }
+        box.getSelectionModel().select(Integer.valueOf(value));
+    }
+
+    private static int autoValue(ComboBox<Integer> box) {
+        return box.getValue() == null ? Settings.AUTO : box.getValue();
+    }
+
     /** Natural Earth base map for the coverage tab, bundled with the app; parsed in the background. */
     private void loadBaseMap() {
         Task<BaseMap> task = new Task<>() {
@@ -326,8 +435,9 @@ public final class MainApp extends Application {
             alert.show();
             return;
         }
-        Settings settings = new Settings(output, threads.getValue(), heap.getValue(),
-                controller.settings().cacheMaxAge(), controller.settings().lastSourceFolder());
+        Settings settings = new Settings(output, autoValue(threads), autoValue(heap),
+                controller.settings().cacheMaxAge(), controller.settings().lastSourceFolder(),
+                hdFallback.isSelected(), controller.settings().lastProduct());
         controller.updateSettings(settings);
         cancelToken = new CancelToken();
         CancelToken token = cancelToken;
@@ -342,7 +452,17 @@ public final class MainApp extends Application {
                 return controller.generate(selected, runView, token);
             }
         };
-        task.setOnSucceeded(e -> runView.finished(task.getValue()));
+        task.setOnSucceeded(e -> {
+            runView.finished(task.getValue());
+            List<String> warnings = JobResult.warnings(task.getValue());
+            if (!warnings.isEmpty()) {
+                Alert alert = new Alert(Alert.AlertType.WARNING, String.join("\n", warnings));
+                alert.initOwner(stage);
+                alert.setHeaderText("Memory mode failed for " + warnings.size() + (warnings.size() == 1 ? " map" : " maps"));
+                alert.setResizable(true);
+                alert.show();
+            }
+        });
         task.setOnFailed(e -> runView.failed(task.getException()));
         Thread thread = new Thread(task, "generation");
         thread.setDaemon(true);

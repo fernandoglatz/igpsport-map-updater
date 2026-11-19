@@ -1,16 +1,24 @@
 package io.github.fernandoglatz.igpsmap.ui;
 
+import io.github.fernandoglatz.igpsmap.catalog.CatalogNode;
+import io.github.fernandoglatz.igpsmap.catalog.OfficialCatalog;
+import io.github.fernandoglatz.igpsmap.catalog.OfficialMapDownloader;
+import io.github.fernandoglatz.igpsmap.catalog.Product;
 import io.github.fernandoglatz.igpsmap.config.AppPaths;
 import io.github.fernandoglatz.igpsmap.config.Settings;
+import io.github.fernandoglatz.igpsmap.config.SystemMemory;
 import io.github.fernandoglatz.igpsmap.device.DetectedMap;
 import io.github.fernandoglatz.igpsmap.device.DetectedSource;
 import io.github.fernandoglatz.igpsmap.device.DeviceScanner;
+import io.github.fernandoglatz.igpsmap.device.UnsupportedDevice;
+import io.github.fernandoglatz.igpsmap.domain.MapFileName;
 import io.github.fernandoglatz.igpsmap.io.MapsCsv;
 import io.github.fernandoglatz.igpsmap.matching.MapJob;
 import io.github.fernandoglatz.igpsmap.matching.Matcher;
 import io.github.fernandoglatz.igpsmap.matching.PolySource;
 import io.github.fernandoglatz.igpsmap.net.DiskCache;
 import io.github.fernandoglatz.igpsmap.net.HttpFetcher;
+import io.github.fernandoglatz.igpsmap.net.ProgressListener;
 import io.github.fernandoglatz.igpsmap.pipeline.CancelToken;
 import io.github.fernandoglatz.igpsmap.pipeline.GenerationListener;
 import io.github.fernandoglatz.igpsmap.pipeline.GenerationService;
@@ -24,12 +32,17 @@ import io.github.fernandoglatz.igpsmap.sources.OsmBoundarySource;
 import io.github.fernandoglatz.igpsmap.sources.OsmFrPolygonCrawler;
 import io.github.fernandoglatz.igpsmap.sources.PolyCandidate;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
@@ -89,6 +102,11 @@ public final class AppController {
         return scanner.detectDevices();
     }
 
+    /** Connected iGPSPORT devices without maps this app can update. */
+    public List<UnsupportedDevice> detectUnsupported() {
+        return scanner.detectUnsupported();
+    }
+
     public List<DetectedMap> scanFolder(Path folder) {
         return scanner.scan(folder, DeviceScanner.DEFAULT_DEPTH);
     }
@@ -126,6 +144,59 @@ public final class AppController {
         return jobs;
     }
 
+    /** The official map catalog of {@code product} (cached; "Refresh sources" clears it). */
+    public List<CatalogNode> catalog(Product product) throws IOException {
+        return new OfficialCatalog(fetcher, cache(), OfficialCatalog.DEFAULT_API).load(product);
+    }
+
+    /** Downloads the original maps of one catalog entry into the originals folder. */
+    public OfficialMapDownloader.Result downloadOfficial(CatalogNode node, Product product, ProgressListener progress) {
+        return new OfficialMapDownloader(fetcher, paths.originals()).fetch(node, product, progress);
+    }
+
+    /** Product to preselect in the "Add maps" dialog for the current source (may be null). */
+    public Optional<Product> preselectProduct(DetectedSource source) {
+        return CatalogSelection.preselect(sourceLabels(source == null ? null : source.root()), settings.lastProduct());
+    }
+
+    /** Names that may identify the device: the folder name and, on Windows, the volume label. */
+    static List<String> sourceLabels(Path root) {
+        List<String> labels = new ArrayList<>();
+        if (root == null) {
+            return labels;
+        }
+        if (root.getFileName() != null) {
+            labels.add(root.getFileName().toString());
+        }
+        try {
+            labels.add(Files.getFileStore(root).name());
+        } catch (IOException | RuntimeException e) {
+            // no volume label available
+        }
+        return labels;
+    }
+
+    /** Downloaded map files as detected maps, skipping unknown names and regions already present. */
+    static List<DetectedMap> toDetected(List<Path> files, Collection<DetectedMap> existing) {
+        Set<String> seen = new HashSet<>();
+        existing.forEach(m -> seen.add(m.name().regionKey()));
+        List<DetectedMap> result = new ArrayList<>();
+        for (Path file : files) {
+            Optional<MapFileName> name = MapFileName.parse(file.getFileName().toString());
+            if (name.isPresent() && seen.add(name.get().regionKey())) {
+                result.add(new DetectedMap(file, name.get()));
+            }
+        }
+        return result;
+    }
+
+    /** The jobs of {@code added} whose region is not already among {@code existing}. */
+    static List<MapJob> newJobs(List<MapJob> existing, List<MapJob> added) {
+        Set<String> seen = new HashSet<>();
+        existing.forEach(j -> seen.add(j.map().name().regionKey()));
+        return added.stream().filter(j -> seen.add(j.map().name().regionKey())).toList();
+    }
+
     /** Forgets cached sources so the next match fetches fresh listings and polygons. */
     public void refreshSources() throws IOException {
         cache().clear();
@@ -150,7 +221,8 @@ public final class AppController {
 
     public List<JobResult> generate(List<MapJob> jobs, GenerationListener listener, CancelToken cancel) {
         GenerationService service = new GenerationService(fetcher, runner, paths, settings,
-                OsmosisCommand.currentJavaExecutable(), System.getProperty("java.class.path"), tagOverrideDirs());
+                OsmosisCommand.currentJavaExecutable(), System.getProperty("java.class.path"), tagOverrideDirs(),
+                SystemMemory.system());
         return service.runAll(jobs, listener, cancel);
     }
 

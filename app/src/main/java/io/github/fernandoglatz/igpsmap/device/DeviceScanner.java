@@ -1,5 +1,6 @@
 package io.github.fernandoglatz.igpsmap.device;
 
+import io.github.fernandoglatz.igpsmap.catalog.Product;
 import io.github.fernandoglatz.igpsmap.domain.MapFileName;
 import java.io.File;
 import java.io.IOException;
@@ -124,6 +125,74 @@ public final class DeviceScanner {
             }
         }
         return sources;
+    }
+
+    /**
+     * Mounted drives that look like iGPSPORT devices (an "iGPSPORT" folder or a model in the drive
+     * name) but hold no map this app can update.
+     */
+    public List<UnsupportedDevice> detectUnsupported() {
+        List<UnsupportedDevice> found = new ArrayList<>();
+        for (Path root : mountRoots()) {
+            if (!scan(root, DEFAULT_DEPTH).isEmpty()) {
+                continue;
+            }
+            List<String> names = driveNames(root);
+            String name = names.isEmpty() ? root.toString() : names.get(0);
+            boolean ultra = names.stream().anyMatch(n -> normalize(n).contains("BINAVIULTRA"));
+            Optional<Product> product = names.stream().map(Product::detect).flatMap(Optional::stream).findFirst();
+            boolean igpsportFolder = hasIgpsportFolder(root);
+            if (!ultra && product.isEmpty() && !igpsportFolder) {
+                continue; // an ordinary drive: never searched any deeper, so big disks don't slow down a rescan
+            }
+            String message;
+            if (ultra || hasFile(root, ".imap")) {
+                message = name + ": its maps use a newer format (.imap, e.g. BiNavi Ultra) that this app can't generate.";
+            } else if (product.isPresent()) {
+                message = name + " (" + product.get() + "): no IGPSPORT .map files on it. "
+                        + "Use Add maps… to download the official ones.";
+            } else {
+                message = name + ": this iGPSPORT device has no maps this app can update. Supported: "
+                        + String.join(", ", Arrays.stream(Product.values()).map(Product::displayName).toList()) + ".";
+            }
+            found.add(new UnsupportedDevice(root, message));
+        }
+        return found;
+    }
+
+    /** Folder name of the mount point and, where available (Windows drive letters), the volume label. */
+    private static List<String> driveNames(Path root) {
+        List<String> names = new ArrayList<>();
+        if (root.getFileName() != null) {
+            names.add(root.getFileName().toString());
+        }
+        try {
+            String volume = Files.getFileStore(root).name();
+            if (volume != null && !volume.isBlank() && !names.contains(volume)) {
+                names.add(volume);
+            }
+        } catch (IOException | RuntimeException e) {
+            // no volume label
+        }
+        return names;
+    }
+
+    private static boolean hasIgpsportFolder(Path root) {
+        return children(root).stream().anyMatch(p -> p.getFileName().toString().equalsIgnoreCase("igpsport"));
+    }
+
+    private static boolean hasFile(Path root, String extension) {
+        try (Stream<Path> files = Files.find(root, DEFAULT_DEPTH + 1,
+                (p, attrs) -> attrs.isRegularFile()
+                        && p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(extension))) {
+            return files.findAny().isPresent();
+        } catch (IOException | java.io.UncheckedIOException e) {
+            return false;
+        }
+    }
+
+    private static String normalize(String text) {
+        return text.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
     }
 
     public static String label(Path root, int count) {

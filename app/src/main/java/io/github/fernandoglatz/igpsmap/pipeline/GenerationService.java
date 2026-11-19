@@ -2,6 +2,7 @@ package io.github.fernandoglatz.igpsmap.pipeline;
 
 import io.github.fernandoglatz.igpsmap.config.AppPaths;
 import io.github.fernandoglatz.igpsmap.config.Settings;
+import io.github.fernandoglatz.igpsmap.config.SystemMemory;
 import io.github.fernandoglatz.igpsmap.io.PbfDateReader;
 import io.github.fernandoglatz.igpsmap.io.PolyFile;
 import io.github.fernandoglatz.igpsmap.matching.MapJob;
@@ -29,9 +30,10 @@ public final class GenerationService {
     private final Path javaExe;
     private final String classpath;
     private final List<Path> tagOverrideDirs;
+    private final SystemMemory memory;
 
     public GenerationService(HttpFetcher fetcher, ProcessRunner runner, AppPaths paths, Settings settings,
-                             Path javaExe, String classpath, List<Path> tagOverrideDirs) {
+                             Path javaExe, String classpath, List<Path> tagOverrideDirs, SystemMemory memory) {
         this.fetcher = fetcher;
         this.runner = runner;
         this.paths = paths;
@@ -39,6 +41,7 @@ public final class GenerationService {
         this.javaExe = javaExe;
         this.classpath = classpath;
         this.tagOverrideDirs = List.copyOf(tagOverrideDirs);
+        this.memory = memory;
     }
 
     public List<JobResult> runAll(List<MapJob> jobs, GenerationListener listener, CancelToken cancel) {
@@ -86,22 +89,40 @@ public final class GenerationService {
             TagFiles tags = TagConfig.resolve(tagOverrideDirs, paths.tmp());
             listener.onStep("Running osmosis");
             listener.onProgress(-1);
-            List<String> command = OsmosisCommand.build(javaExe, classpath, settings.maxHeapGb(), settings.threads(),
-                    paths.tmp(), pbf, poly, tags, tmpMap);
-            int exit = runner.run(command, listener::onLog, cancel);
-            if (cancel.isCancelled()) {
-                throw new CancellationException();
+            long pbfBytes = Files.size(pbf);
+            long ramBytes = memory.totalBytes();
+            if (!memory.detected()) {
+                listener.onLog("Could not detect installed memory; assuming " + ramBytes / (1024 * 1024 * 1024) + " GB");
+            }
+            WriterPlan plan = WriterTuning.plan(pbfBytes, ramBytes, settings.threads(), settings.maxHeapGb());
+            int exit = runWriter(plan, pbfBytes, ramBytes, pbf, poly, tags, tmpMap, listener, cancel);
+            String warning = null;
+            if (exit != 0 && "ram".equals(plan.type())) {
+                int ramExit = exit;
+                if (settings.hdFallback()) {
+                    listener.onLog("RAM writer failed (exit " + ramExit + "); retrying in disk mode (hd)");
+                    Files.deleteIfExists(tmpMap);
+                    WriterPlan fallback = WriterTuning.fallback(ramBytes, settings.threads(), settings.maxHeapGb());
+                    exit = runWriter(fallback, pbfBytes, ramBytes, pbf, poly, tags, tmpMap, listener, cancel);
+                    warning = exit == 0
+                            ? "Memory mode failed (exit " + ramExit + "); generated in disk mode instead."
+                            : "Memory mode failed (exit " + ramExit + ") and the disk-mode retry failed too.";
+                } else {
+                    warning = "Memory mode failed (exit " + ramExit + "). Turn on \"Retry in disk mode if memory runs out\" "
+                            + "or raise Max memory.";
+                }
+                listener.onLog("WARNING: " + warning);
             }
             if (exit != 0) {
-                return new JobResult(job, JobResult.Status.FAILED, null, "osmosis failed with exit code " + exit);
+                return new JobResult(job, JobResult.Status.FAILED, null, "osmosis failed with exit code " + exit, warning);
             }
             if (!Files.exists(tmpMap)) {
-                return new JobResult(job, JobResult.Status.FAILED, null, "osmosis produced no file");
+                return new JobResult(job, JobResult.Status.FAILED, null, "osmosis produced no file", warning);
             }
 
             listener.onStep("Renaming");
             Path output = MapRenamer.rename(tmpMap, job.map().name(), PbfDateReader.resolveDate(pbf), settings.outputDir());
-            return new JobResult(job, JobResult.Status.SUCCESS, output, "Generated " + output.getFileName());
+            return new JobResult(job, JobResult.Status.SUCCESS, output, "Generated " + output.getFileName(), warning);
         } catch (CancellationException e) {
             return new JobResult(job, JobResult.Status.CANCELLED, null, "Cancelled");
         } catch (InterruptedException e) {
@@ -119,6 +140,18 @@ public final class GenerationService {
                 // best effort cleanup
             }
         }
+    }
+
+    /** Runs osmosis once with {@code plan}; throws CancellationException when cancelled meanwhile. */
+    private int runWriter(WriterPlan plan, long pbfBytes, long ramBytes, Path pbf, Path poly, TagFiles tags,
+                          Path tmpMap, GenerationListener listener, CancelToken cancel) throws IOException, InterruptedException {
+        listener.onLog(plan.describe(pbfBytes, ramBytes));
+        List<String> command = OsmosisCommand.build(javaExe, classpath, plan, paths.tmp(), pbf, poly, tags, tmpMap);
+        int exit = runner.run(command, listener::onLog, cancel);
+        if (cancel.isCancelled()) {
+            throw new CancellationException();
+        }
+        return exit;
     }
 
     private Path ensurePbf(URI url, GenerationListener listener, CancelToken cancel) throws IOException {

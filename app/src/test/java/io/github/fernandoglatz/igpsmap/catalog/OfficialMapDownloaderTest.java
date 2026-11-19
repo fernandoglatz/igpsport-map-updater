@@ -1,0 +1,188 @@
+package io.github.fernandoglatz.igpsmap.catalog;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import io.github.fernandoglatz.igpsmap.net.HttpFetcher;
+import io.github.fernandoglatz.igpsmap.net.StubServer;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class OfficialMapDownloaderTest {
+
+    private static final String MAIN = "FR940024071744O3J900E00D.map";
+    private static final byte[] MAP_BYTES = "mapsforge binary OSM main map".repeat(500).getBytes(StandardCharsets.US_ASCII);
+
+    @TempDir
+    Path dir;
+
+    private StubServer server;
+    private OfficialMapDownloader downloader;
+    private Path catalogDir;
+
+    @BeforeEach
+    void setUp() throws IOException {
+        server = new StubServer();
+        HttpFetcher fetcher = new HttpFetcher(HttpClient.newHttpClient(), "t", Duration.ofSeconds(5));
+        downloader = new OfficialMapDownloader(fetcher, dir.resolve("originals"));
+        catalogDir = dir.resolve("originals").resolve(Product.IGS800.catalogId());
+    }
+
+    @AfterEach
+    void tearDown() {
+        server.close();
+    }
+
+    private static byte[] zip(Map<String, byte[]> entries) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream out = new ZipOutputStream(bytes)) {
+            for (Map.Entry<String, byte[]> e : entries.entrySet()) {
+                out.putNextEntry(new ZipEntry(e.getKey()));
+                out.write(e.getValue());
+                out.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+    /** iGS800-style package: main map, overview, contour layer and routing files. */
+    private byte[] fr94() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        entries.put("Maps/" + MAIN, MAP_BYTES);
+        entries.put("Maps/FR9400C.map", new byte[] {1, 2, 3});
+        entries.put("Maps/FR94A024071709A07Y001001.map", new byte[] {4, 5, 6});
+        entries.put("Router/FR9400E.rtd", new byte[100]);
+        return zip(entries);
+    }
+
+    private CatalogNode node(String name, String path) {
+        return new CatalogNode("id-" + name, name, List.of("europe", name), 123, "2407", server.uri(path), List.of());
+    }
+
+    @Test
+    void extractsOnlyTheMainMapOfAPackage() throws IOException {
+        byte[] zip = fr94();
+        server.handle("/Mapinfo/iGS800/FR94.zip", ex -> StubServer.sendRange(ex, zip));
+
+        OfficialMapDownloader.Result result = downloader.fetch(node("Reunion", "/Mapinfo/iGS800/FR94.zip"),
+                Product.IGS800, (d, t) -> { });
+
+        assertNull(result.error());
+        assertEquals(List.of(catalogDir.resolve(MAIN)), result.maps());
+        assertArrayEquals(MAP_BYTES, Files.readAllBytes(result.maps().get(0)));
+        try (Stream<Path> files = Files.list(catalogDir)) {
+            assertEquals(List.of(MAIN), files.map(p -> p.getFileName().toString())
+                    .filter(n -> !n.startsWith(".")).toList());
+        }
+    }
+
+    @Test
+    void reusesMapsDownloadedBefore() throws IOException {
+        byte[] zip = fr94();
+        server.handle("/FR94.zip", ex -> StubServer.sendRange(ex, zip));
+        CatalogNode node = node("Reunion", "/FR94.zip");
+        downloader.fetch(node, Product.IGS800, (d, t) -> { });
+        int requests = server.requests.size();
+
+        OfficialMapDownloader.Result again = downloader.fetch(node, Product.IGS800, (d, t) -> { });
+
+        assertEquals(List.of(catalogDir.resolve(MAIN)), again.maps());
+        assertEquals(requests, server.requests.size());
+    }
+
+    @Test
+    void downloadsBareMapFiles() throws IOException {
+        server.handle("/Mapinfo/south-america/TT000023090922I2YE016014.map", ex -> StubServer.send(ex, 200, MAP_BYTES));
+
+        OfficialMapDownloader.Result result = downloader.fetch(
+                node("Trinidad", "/Mapinfo/south-america/TT000023090922I2YE016014.map"), Product.IGS800, (d, t) -> { });
+
+        assertNull(result.error());
+        assertEquals(List.of(catalogDir.resolve("TT000023090922I2YE016014.map")), result.maps());
+    }
+
+    @Test
+    void packageWithoutAUsableMapIsAnError() throws IOException {
+        byte[] zip = zip(Map.of("VN00/Router/VN.irtd", new byte[10], "VN00/Maps/055/T1.imap", new byte[10]));
+        server.handle("/VN00.zip", ex -> StubServer.sendRange(ex, zip));
+
+        OfficialMapDownloader.Result result = downloader.fetch(node("Vietnam", "/VN00.zip"), Product.IGS800, (d, t) -> { });
+
+        assertEquals(List.of(), result.maps());
+        assertEquals("No usable map in Vietnam", result.error());
+    }
+
+    @Test
+    void nonZipDownloadsAreAnError() {
+        server.handle("/3ba56f27", ex -> StubServer.sendRange(ex, "<html>nope</html>".getBytes(StandardCharsets.US_ASCII)));
+        OfficialMapDownloader.Result result = downloader.fetch(node("Azerbaijan", "/3ba56f27"), Product.IGS800, (d, t) -> { });
+        assertEquals("Azerbaijan is not a map package", result.error());
+    }
+
+    @Test
+    void httpErrorsBecomeResultErrors() {
+        server.handle("/gone.zip", ex -> StubServer.send(ex, 404, new byte[0]));
+        OfficialMapDownloader.Result result = downloader.fetch(node("Gone", "/gone.zip"), Product.IGS800, (d, t) -> { });
+        assertTrue(result.error().startsWith("Gone: "), result.error());
+    }
+
+    @Test
+    void serversWithoutRangeSupportGetAFullDownload() throws IOException {
+        byte[] zip = fr94();
+        server.handle("/FR94.zip", ex -> StubServer.send(ex, 200, zip));
+
+        OfficialMapDownloader.Result result = downloader.fetch(node("Reunion", "/FR94.zip"), Product.IGS800, (d, t) -> { });
+
+        assertNull(result.error());
+        assertEquals(List.of(catalogDir.resolve(MAIN)), result.maps());
+        try (Stream<Path> files = Files.list(catalogDir)) {
+            assertTrue(files.noneMatch(p -> p.getFileName().toString().endsWith(".zip")));
+        }
+    }
+
+    @Test
+    void cancellationPropagatesAndLeavesNoMap() throws IOException {
+        byte[] zip = fr94();
+        server.handle("/FR94.zip", ex -> StubServer.sendRange(ex, zip));
+        assertThrows(CancellationException.class, () -> downloader.fetch(node("Reunion", "/FR94.zip"), Product.IGS800,
+                (done, total) -> {
+                    if (done > 0) {
+                        throw new CancellationException();
+                    }
+                }));
+        assertTrue(!Files.exists(catalogDir.resolve(MAIN)));
+    }
+
+    @Test
+    void nodeWithoutLinkIsAnError() {
+        CatalogNode none = new CatalogNode("x", "Europe", List.of("Europe"), 0, "", null, List.of());
+        assertEquals("Europe has no download link", downloader.fetch(none, Product.IGS800, (d, t) -> { }).error());
+    }
+
+    @Test
+    void codePrefixComesFromTheLinkFileName() {
+        assertEquals("FR94", node("x", "/Mapinfo/iGS800/FR94.zip").codePrefix().orElseThrow());
+        assertTrue(new CatalogNode("x", "x", List.of(), 0, "", URI.create("https://h/abc-def"), List.of())
+                .codePrefix().isEmpty());
+    }
+}

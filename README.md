@@ -2,14 +2,26 @@
 
 A desktop app that regenerates the offline maps of IGPSPORT cycling computers from current OpenStreetMap data. It finds the original maps on your device, works out the matching OpenStreetMap region for each one, and builds new Mapsforge `.map` files with the file names IGPSPORT devices expect.
 
+## Features
+
+- **Finds your maps**: detects the connected device (or a folder of original maps) and matches every map to an OpenStreetMap region, with a confidence score you can review and override.
+- **Adds maps you don't have**: downloads original maps from iGPSPORT's official catalog for your device, so you can regenerate regions that aren't on it.
+- **Tunes itself**: picks the Mapsforge writer mode, threads and memory from each extract's size and your installed RAM, and retries in disk mode if memory runs out.
+- **Shows coverage**: every map on a world map, coloured by match status.
+- **Keeps IGPSPORT's file names**: output files are named the way the device expects, with the date of the OpenStreetMap data.
+
 ## Supported Products
 
 - BiNavi
+- BiNavi Air
 - iGS800
+- BSC500
 - iGS630
 - iGS630S
 - BSC300T
 - BSC300
+
+BiNavi Ultra isn't supported: its maps use another format (`.imap`). If you connect a device the app can't update, it tells you why.
 
 Official support/download page: https://www.igpsport.com/en/support/product
 
@@ -45,7 +57,7 @@ Java is bundled, so nothing else is needed. The macOS build isn't signed: on fir
 
    ![Review table with the maps of an iGS630S, grouped by country](misc/app-review.png)
 
-   *The 265 maps of an iGS630S, grouped by country. Japanese prefectures match OpenStreetMap boundaries; Honduras and Aichi are partial matches waiting for review.*
+   *The 265 maps of an iGS630S, grouped by country. German states match their Geofabrik extracts; for one map (DE06) no polygon fit, so it falls back to a bounding box and starts unchecked.*
 
    ![Edit dialog listing alternative polygons with their scores](misc/app-edit.png)
 
@@ -55,8 +67,23 @@ Java is bundled, so nothing else is needed. The macOS build isn't signed: on fir
 
    ![Coverage tab: the maps of an iGS630S on a world map](misc/app-coverage.png)
 
-3. **Press Generate.** Downloads, conversion and renaming run one map at a time, with progress, MB/s and a log. **Cancel** stops cleanly.
-4. **Copy the files** from the output folder to the device's `iGPSPORT/Maps/` folder, replacing the old ones.
+3. **Add maps that aren't on your device** (optional). **Add maps…** opens iGPSPORT's official map catalog for your device. **Product** is preselected from the connected device's name (or the last one you used); filter by name and check the regions you want. Regions already in the list are greyed out. Only the main `.map` file is downloaded out of each official package, not its routing or contour files. The new maps are matched and added to the list like the device's own. It also works with no device connected.
+
+   ![Add official maps dialog with the iGS630S catalog](misc/app-add-maps.png)
+
+   *The iGS630S catalog, preselected from the connected device. Regions the device already has are greyed out.*
+
+   Downloads are kept in the app's `originals/` folder, so adding the same region again is instant.
+
+4. **Press Generate.** Downloads, conversion and renaming run one map at a time, with progress, MB/s and a log. **Cancel** stops cleanly.
+
+   **Threads** and **Max memory** default to **Auto**: each map is written with the fast in-memory writer, using 2 threads for extracts up to 350 MB and 1 thread above that, with the memory limit set to 80% of your installed RAM. Pick fixed values to override. **Retry in disk mode if memory runs out** (on by default) reruns a map with the slower disk-based writer when the in-memory one fails. Either way, a warning lists the maps where memory mode failed when the run ends.
+
+   ![Generation of the Guyana map: the log shows the writer settings Auto picked](misc/app-run.png)
+
+   *Regenerating Guyana from the iGS630S: Auto picked the in-memory writer with 2 threads and a heap of up to 80% of the machine's 9.7 GB.*
+
+5. **Copy the files** from the output folder to the device's `iGPSPORT/Maps/` folder, replacing the old ones.
 
 Confirmed matches are saved to `maps.csv`, so the next run starts from them.
 
@@ -178,9 +205,10 @@ Below is a comparison between an original IGPSPORT map (left) and a generated on
 - Make sure it's connected as a USB drive and shows up in your file manager, then press **⟳ Rescan**.
 - In a virtual machine, pass the USB device through to the VM.
 - Or copy the original maps to a folder and use **Choose folder…**.
+- If the app says the **connected device is not supported**, it found an iGPSPORT device without maps it can update: either a model with a newer map format (`.imap` files, e.g. BiNavi Ultra), or a supported model with no `.map` files on it (use **Add maps…** to download the official ones).
 
 ### Out of memory
-Raise **Max memory (GB)** at the bottom of the window. Large countries may need 12–16 GB.
+With **Max memory** on **Auto**, the app already uses up to 80% of your RAM. If memory mode still fails, the map is retried in disk mode (slower, but it needs much less memory) and the run ends with a warning listing those maps. If you turned **Retry in disk mode if memory runs out** off, turn it back on.
 
 ### "Overpass is busy"
 The OpenStreetMap boundary service is overloaded now and then. The app retries automatically; if it still fails, press **Refresh sources** later.
@@ -196,7 +224,7 @@ For each confirmed map:
 
 1. **Download** the PBF extract (reused while it's current; interrupted downloads resume) and the polygon.
 2. **Run osmosis** with the Mapsforge writer plugin:
-   `--read-pbf-fast` → `--bounding-polygon` → `--tag-transform` → `--mapfile-writer type=hd zoom-interval-conf=13,13,13,14,14,14`
+   `--read-pbf-fast` → `--bounding-polygon` → `--tag-transform` → `--mapfile-writer type=ram zoom-interval-conf=13,13,13,14,14,14` (`type=hd` for the disk-mode retry)
 3. **Rename** the result: read the map's bounding box, compute the GEOCODE, and apply the IGPSPORT file name.
 
 ### Map Features Included
@@ -232,6 +260,8 @@ app/package.sh --type deb --type app-image    # several types; app-image is arch
 .\app\package.ps1                             # Windows .msi (needs the WiX Toolset 3)
 .\app\package.ps1 -Type msi,app-image         # app-image is archived as .zip
 ```
+
+The app icon is drawn by `app/packaging/make_icon.py` (Python with Pillow). It writes the window icons to `app/src/main/resources/ui/` and the installer icons (`icon.png`, `icon.ico`, `icon.icns`) to `app/packaging/`. Run it again after changing the drawing.
 
 ## License
 

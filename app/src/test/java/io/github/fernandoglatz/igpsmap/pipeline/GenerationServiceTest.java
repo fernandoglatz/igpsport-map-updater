@@ -36,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
 class GenerationServiceTest {
 
     private static final String POLY = "p\n1\n0 0\n1 0\n1 1\nEND\nEND\n";
+    private static final long SIXTEEN_GIB = 16L * 1024 * 1024 * 1024;
     private static final Instant PBF_MODIFIED = Instant.parse("2026-01-12T00:00:00Z");
 
     @TempDir
@@ -93,7 +94,7 @@ class GenerationServiceTest {
     private GenerationService service(ProcessRunner runner) {
         HttpFetcher fetcher = new HttpFetcher(HttpClient.newHttpClient(), "t", Duration.ofSeconds(5));
         return new GenerationService(fetcher, runner, paths, settings, Path.of("/jre/bin/java"), "cp.jar",
-                List.of(dir.resolve("no-overrides")));
+                List.of(dir.resolve("no-overrides")), () -> SIXTEEN_GIB);
     }
 
     private static final class RecordingListener implements GenerationListener {
@@ -152,7 +153,9 @@ class GenerationServiceTest {
         assertTrue(Files.exists(paths.download().resolve("brazil-latest.osm.pbf")));
         List<String> cmd = commands.get(0);
         assertTrue(cmd.contains("file=" + paths.download().resolve("polygons/127.0.0.1/polygons/df.poly")), cmd.toString());
-        assertEquals("threads=4", cmd.get(cmd.size() - 2));
+        // Auto settings and a tiny PBF: RAM writer with two threads, heap capped at 80% of 16 GiB.
+        assertEquals("threads=2", cmd.get(cmd.size() - 2));
+        assertTrue(cmd.contains("type=ram") && cmd.contains("-Xmx13107m"), cmd.toString());
     }
 
     @Test
@@ -205,6 +208,7 @@ class GenerationServiceTest {
 
     @Test
     void failedJobDoesNotStopTheQueueOrLeaveTempMaps() throws IOException {
+        settings = withFallback(false);
         RecordingListener listener = new RecordingListener();
         List<JobResult> results = service(fakeOsmosis(1, true)).runAll(List.of(
                 job("BR01002303102B83FO00N00E.map", remotePoly()),
@@ -344,5 +348,115 @@ class GenerationServiceTest {
                 new RecordingListener(), new CancelToken());
 
         assertEquals("pbf-bytes", Files.readString(pbf));
+    }
+
+    private Settings withFallback(boolean fallback) {
+        return new Settings(settings.outputDir(), Settings.AUTO, Settings.AUTO, settings.cacheMaxAge(), null, fallback, null);
+    }
+
+    @Test
+    void retryInDiskModeIsOnByDefault() {
+        assertTrue(Settings.defaults(paths).hdFallback());
+        List<JobResult> results = service(fakeOsmosis(1, true)).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken());
+        assertEquals(JobResult.Status.SUCCESS, results.get(0).status());
+        assertEquals(2, commands.size());
+    }
+
+    @Test
+    void ramFailureWithoutFallbackFailsWithAWarning() {
+        settings = withFallback(false);
+        List<JobResult> results = service(fakeOsmosis(1, true)).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken());
+        assertEquals(JobResult.Status.FAILED, results.get(0).status());
+        assertEquals(1, commands.size());
+        assertTrue(commands.get(0).contains("type=ram"));
+        assertEquals("Memory mode failed (exit 1). Turn on \"Retry in disk mode if memory runs out\" "
+                + "or raise Max memory.", results.get(0).warning());
+    }
+
+    @Test
+    void successfulRetryCarriesAWarning() {
+        settings = withFallback(true);
+        List<JobResult> results = service(fakeOsmosis(1, true)).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken());
+        assertEquals(JobResult.Status.SUCCESS, results.get(0).status());
+        assertEquals("Memory mode failed (exit 1); generated in disk mode instead.", results.get(0).warning());
+    }
+
+    @Test
+    void failedRetryCarriesAWarning() {
+        settings = withFallback(true);
+        ProcessRunner alwaysFails = (cmd, lines, token) -> {
+            commands.add(cmd);
+            return 1;
+        };
+        List<JobResult> results = service(alwaysFails).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken());
+        assertEquals(JobResult.Status.FAILED, results.get(0).status());
+        assertEquals("Memory mode failed (exit 1) and the disk-mode retry failed too.", results.get(0).warning());
+    }
+
+    @Test
+    void normalRunsHaveNoWarning() {
+        List<JobResult> results = service(fakeOsmosis(-1, true)).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken());
+        assertEquals(null, results.get(0).warning());
+        assertEquals(List.of(), JobResult.warnings(results));
+    }
+
+    @Test
+    void warningsListTheMapAndTheReason() {
+        settings = withFallback(true);
+        List<JobResult> results = service(fakeOsmosis(1, true)).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken());
+        assertEquals(List.of("BR01002303102B83FO00N00E.map: Memory mode failed (exit 1); generated in disk mode instead."),
+                JobResult.warnings(results));
+    }
+
+    @Test
+    void ramFailureWithFallbackRetriesInDiskMode() {
+        settings = withFallback(true);
+        RecordingListener listener = new RecordingListener();
+        List<JobResult> results = service(fakeOsmosis(1, true)).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), listener, new CancelToken());
+        assertEquals(JobResult.Status.SUCCESS, results.get(0).status(), results.get(0).message());
+        assertEquals(2, commands.size());
+        assertTrue(commands.get(1).contains("type=hd"), commands.get(1).toString());
+        assertTrue(commands.get(1).contains("-Xmx8192m"), commands.get(1).toString());
+        assertTrue(listener.events.contains("log RAM writer failed (exit 1); retrying in disk mode (hd)"),
+                listener.events.toString());
+    }
+
+    @Test
+    void cancelDuringTheRamRunDoesNotRetry() {
+        settings = withFallback(true);
+        ProcessRunner cancelling = (cmd, lines, token) -> {
+            commands.add(cmd);
+            token.cancel();
+            return 1;
+        };
+        List<JobResult> results = service(cancelling).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken());
+        assertEquals(JobResult.Status.CANCELLED, results.get(0).status());
+        assertEquals(1, commands.size());
+    }
+
+    @Test
+    void logsTheWriterDecision() {
+        RecordingListener listener = new RecordingListener();
+        service(fakeOsmosis(-1, true)).runAll(List.of(job("BR01002303102B83FO00N00E.map", remotePoly())),
+                listener, new CancelToken());
+        assertTrue(listener.events.stream().anyMatch(e -> e.startsWith("log Writer: ram, 2 threads")),
+                listener.events.toString());
+    }
+
+    @Test
+    void manualSettingsAreUsedAsGiven() {
+        settings = new Settings(settings.outputDir(), 6, 10, settings.cacheMaxAge(), null, false, null);
+        service(fakeOsmosis(-1, true)).runAll(List.of(job("BR01002303102B83FO00N00E.map", remotePoly())),
+                new RecordingListener(), new CancelToken());
+        assertTrue(commands.get(0).contains("threads=6") && commands.get(0).contains("-Xmx10240m"),
+                commands.get(0).toString());
     }
 }

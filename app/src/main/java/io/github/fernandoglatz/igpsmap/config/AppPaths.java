@@ -35,6 +35,11 @@ public record AppPaths(Path root, Path settingsFile) {
         return root.resolve("output");
     }
 
+    /** Original maps downloaded from the official iGPSPORT catalog, one folder per catalog. */
+    public Path originals() {
+        return root.resolve("originals");
+    }
+
     public Path mapsCsv() {
         return root.resolve("maps.csv");
     }

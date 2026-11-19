@@ -58,14 +58,19 @@ class OsmosisIntegrationTest {
         Path poly = Files.writeString(dir.resolve("df.poly"),
                 PolyFile.fromBoundingBox(new BoundingBox(-16.07, -48.305, -15.48, -47.29), "df"));
         TagFiles tags = TagConfig.resolve(List.of(), dir.resolve("tmp"));
-        Path out = dir.resolve("tmp/out.map");
-        List<String> cmd = new ArrayList<>(OsmosisCommand.build(java, classpath, 1, 1, dir.resolve("tmp"), pbf, poly, tags, out));
-        int exit = runner.run(cmd, log::add, new CancelToken());
-        assertEquals(0, exit, String.join("\n", log));
-        assertTrue(Files.exists(out), String.join("\n", log));
+        // Both writer modes: "ram" is the default, "hd" the disk-mode retry.
+        Path out = null;
+        for (String type : List.of("ram", "hd")) {
+            out = dir.resolve("tmp/out-" + type + ".map");
+            WriterPlan plan = new WriterPlan(type, 1, 256, 1024, "integration test");
+            List<String> cmd = new ArrayList<>(OsmosisCommand.build(java, classpath, plan, dir.resolve("tmp"), pbf, poly, tags, out));
+            int exit = runner.run(cmd, log::add, new CancelToken());
+            assertEquals(0, exit, String.join("\n", log));
+            assertTrue(Files.exists(out), String.join("\n", log));
 
-        BoundingBox box = MapHeaderReader.readBoundingBox(out);
-        assertTrue(box.minLat() < -15.79 && box.maxLat() > -15.79, box.toString());
+            BoundingBox box = MapHeaderReader.readBoundingBox(out);
+            assertTrue(box.minLat() < -15.79 && box.maxLat() > -15.79, type + ": " + box);
+        }
 
         Path renamed = MapRenamer.rename(out, MapFileName.parse("BR01002303102B83FO00N00E.map").orElseThrow(),
                 LocalDate.of(2026, 1, 12), dir.resolve("output"));

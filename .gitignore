@@ -3,6 +3,7 @@ output
 tmp
 backup
 cache/
+originals/
 app/target/
 docs/superpowers/
 .superpowers/

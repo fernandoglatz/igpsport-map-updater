@@ -70,7 +70,9 @@ final class RunView extends VBox implements GenerationListener {
 
     void finished(List<JobResult> results) {
         long ok = results.stream().filter(r -> r.status() == JobResult.Status.SUCCESS).count();
-        overall.setText("Done: " + ok + " of " + results.size() + " maps generated.");
+        int warnings = JobResult.warnings(results).size();
+        overall.setText("Done: " + ok + " of " + results.size() + " maps generated."
+                + (warnings > 0 ? " ⚠ Memory mode failed for " + warnings + (warnings == 1 ? " map." : " maps.") : ""));
         step.setText("");
         detail.setText("");
         overallBar.setProgress(1);
@@ -138,12 +140,13 @@ final class RunView extends VBox implements GenerationListener {
     public void onJobDone(JobResult result) {
         Platform.runLater(() -> {
             String icon = switch (result.status()) {
-                case SUCCESS -> "✔";
+                case SUCCESS -> result.warning() != null ? "⚠" : "✔";
                 case FAILED -> "✕";
                 case SKIPPED -> "–";
                 case CANCELLED -> "■";
             };
-            summary.getItems().add(icon + " " + result.job().map().path().getFileName() + " — " + result.message());
+            summary.getItems().add(icon + " " + result.job().map().path().getFileName() + " — " + result.message()
+                    + (result.warning() != null ? " ⚠ " + result.warning() : ""));
             appendLog("[" + result.status() + "] " + result.message());
         });
     }

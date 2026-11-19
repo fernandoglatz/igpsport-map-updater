@@ -10,7 +10,11 @@ $AppDir = $PSScriptRoot
 $Name = "IGPSPORT Map Updater"
 $Artifact = "igpsport-map-updater"
 $MainClass = "io.github.fernandoglatz.igpsmap.ui.Launcher"
-$Modules = "java.base,java.desktop,java.logging,java.xml,java.sql,java.naming,java.net.http,java.management,java.prefs,java.scripting,jdk.unsupported,jdk.crypto.ec,jdk.httpserver,jdk.zipfs"
+$Modules = "java.base,java.desktop,java.logging,java.xml,java.sql,java.naming,java.net.http,java.management,jdk.management,java.prefs,java.scripting,jdk.unsupported,jdk.crypto.ec,jdk.httpserver,jdk.zipfs"
+
+# Icon made by packaging\make_icon.py.
+$Icon = "$AppDir\packaging\icon.ico"
+if (-not (Test-Path $Icon)) { throw "Icon not found: $Icon" }
 
 if (-not (Get-Command jpackage -ErrorAction SilentlyContinue)) { throw "jpackage not found (needs JDK 17+)" }
 
@@ -50,6 +54,7 @@ foreach ($t in $Type) {
         --java-options "-Xmx1g" `
         --add-modules $Modules `
         --jlink-options "--strip-debug --no-man-pages --no-header-files" `
+        --icon $Icon `
         --dest $Out `
         @Extra
     if ($LASTEXITCODE -ne 0) { throw "jpackage failed for type $t" }

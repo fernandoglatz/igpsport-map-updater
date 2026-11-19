@@ -65,4 +65,35 @@ class AppControllerTest {
         assertEquals(List.of("0100", "0200", "0500"),
                 AppController.preselected(jobs).stream().map(j -> j.map().name().regionCode()).toList());
     }
+
+    @Test
+    void downloadedFilesBecomeDetectedMapsWithoutDuplicates() {
+        List<DetectedMap> existing = List.of(new DetectedMap(Path.of("/dev/BR01002303102B83FO00N00E.map"),
+                MapFileName.parse("BR01002303102B83FO00N00E.map").orElseThrow()));
+        Path dl = dir.resolve("originals");
+        List<DetectedMap> added = AppController.toDetected(List.of(
+                dl.resolve("BR01002604202B83FO00N00E.map"), // same region as a device map, newer date
+                dl.resolve("BR25002604202833DN04O04Q.map"),
+                dl.resolve("BR25002604202833DN04O04Q.map"),
+                dl.resolve("FR9400C.map")), existing);
+
+        assertEquals(List.of(dl.resolve("BR25002604202833DN04O04Q.map")), added.stream().map(DetectedMap::path).toList());
+    }
+
+    @Test
+    void newJobsSkipsRegionsAlreadyInTheList() {
+        PolySource poly = new PolySource.Remote(URI.create("https://o/x.poly"), "x");
+        List<MapJob> existing = List.of(job("BR01002601122B83FO00N00E.map", poly, Confidence.CSV));
+        List<MapJob> added = List.of(job("BR01002604202B83FO00N00E.map", poly, Confidence.HIGH),
+                job("BR25002604202833DN04O04Q.map", poly, Confidence.HIGH));
+        assertEquals(List.of("2500"), AppController.newJobs(existing, added).stream()
+                .map(j -> j.map().name().regionCode()).toList());
+    }
+
+    @Test
+    void deviceLabelsIncludeTheFolderName() {
+        List<String> labels = AppController.sourceLabels(dir.resolve("IGS630S"));
+        assertEquals("IGS630S", labels.get(0));
+        assertEquals(List.of(), AppController.sourceLabels(null));
+    }
 }

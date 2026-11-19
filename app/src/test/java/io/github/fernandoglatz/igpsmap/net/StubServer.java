@@ -53,6 +53,36 @@ public final class StubServer implements AutoCloseable {
         }
     }
 
+    /**
+     * Serves {@code whole}, honouring a single {@code Range: bytes=a-b}, {@code bytes=a-} or
+     * {@code bytes=-n} header with 206 and Content-Range like a static file server does.
+     */
+    public static void sendRange(HttpExchange exchange, byte[] whole) throws IOException {
+        String range = exchange.getRequestHeaders().getFirst("Range");
+        java.util.regex.Matcher m = range == null ? null
+                : java.util.regex.Pattern.compile("bytes=(\\d*)-(\\d*)").matcher(range.trim());
+        if (m == null || !m.matches() || (m.group(1).isEmpty() && m.group(2).isEmpty())) {
+            send(exchange, 200, whole);
+            return;
+        }
+        long from;
+        long to;
+        if (m.group(1).isEmpty()) {
+            from = Math.max(0, whole.length - Long.parseLong(m.group(2)));
+            to = whole.length - 1;
+        } else {
+            from = Long.parseLong(m.group(1));
+            to = m.group(2).isEmpty() ? whole.length - 1 : Math.min(Long.parseLong(m.group(2)), whole.length - 1);
+        }
+        if (from >= whole.length || from > to) {
+            exchange.getResponseHeaders().add("Content-Range", "bytes */" + whole.length);
+            send(exchange, 416, new byte[0]);
+            return;
+        }
+        exchange.getResponseHeaders().add("Content-Range", "bytes " + from + "-" + to + "/" + whole.length);
+        send(exchange, 206, java.util.Arrays.copyOfRange(whole, (int) from, (int) to + 1));
+    }
+
     @Override
     public void close() {
         server.stop(0);

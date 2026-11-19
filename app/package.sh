@@ -11,7 +11,7 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="IGPSPORT Map Updater"
 ARTIFACT="igpsport-map-updater"
 MAIN_CLASS="io.github.fernandoglatz.igpsmap.ui.Launcher"
-MODULES="java.base,java.desktop,java.logging,java.xml,java.sql,java.naming,java.net.http,java.management,java.prefs,java.scripting,jdk.unsupported,jdk.crypto.ec,jdk.httpserver,jdk.zipfs"
+MODULES="java.base,java.desktop,java.logging,java.xml,java.sql,java.naming,java.net.http,java.management,jdk.management,java.prefs,java.scripting,jdk.unsupported,jdk.crypto.ec,jdk.httpserver,jdk.zipfs"
 
 TYPES=()
 while [ $# -gt 0 ]; do
@@ -41,6 +41,10 @@ esac
 if [ ${#TYPES[@]} -eq 0 ]; then
     if [ "$OS" = "macos" ]; then TYPES=("dmg"); else TYPES=("deb"); fi
 fi
+
+# Icon made by packaging/make_icon.py: .icns for macOS, .png for Linux.
+if [ "$OS" = "macos" ]; then ICON="$APP_DIR/packaging/icon.icns"; else ICON="$APP_DIR/packaging/icon.png"; fi
+[ -f "$ICON" ] || { echo "ERROR: icon not found: $ICON" >&2; exit 1; }
 
 command -v jpackage >/dev/null || { echo "ERROR: jpackage not found (needs JDK 17+)" >&2; exit 1; }
 
@@ -79,6 +83,7 @@ for TYPE in "${TYPES[@]}"; do
         --java-options "-Xmx1g" \
         --add-modules "$MODULES" \
         --jlink-options "--strip-debug --no-man-pages --no-header-files" \
+        --icon "$ICON" \
         --dest "$OUT" \
         ${EXTRA[@]+"${EXTRA[@]}"}
 
