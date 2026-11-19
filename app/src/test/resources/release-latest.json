@@ -1,0 +1,16 @@
+{
+  "tag_name": "v1.2.0",
+  "name": "v1.2.0",
+  "html_url": "https://github.com/fernandoglatz/igpsport-map-updater/releases/tag/v1.2.0",
+  "draft": false,
+  "prerelease": false,
+  "body": "## What's new\r\n- In-app updates\r\n\r\n**Full Changelog**: https://github.com/fernandoglatz/igpsport-map-updater/compare/v1.1.0...v1.2.0",
+  "assets": [
+    {"name": "igpsport-map-updater-1.2.0-linux-x64.deb", "size": 40735878, "digest": "sha256:E0350ED1A57AD0EFE2314905B0A71D4B94B86B1F857B40CBFBB0C512A3E0268D", "browser_download_url": "https://github.com/fernandoglatz/igpsport-map-updater/releases/download/v1.2.0/igpsport-map-updater-1.2.0-linux-x64.deb"},
+    {"name": "igpsport-map-updater-1.2.0-linux-x64.tar.gz", "size": 48636336, "browser_download_url": "https://github.com/fernandoglatz/igpsport-map-updater/releases/download/v1.2.0/igpsport-map-updater-1.2.0-linux-x64.tar.gz"},
+    {"name": "igpsport-map-updater-1.2.0-macos-arm64.dmg", "size": 47574478, "browser_download_url": "https://github.com/fernandoglatz/igpsport-map-updater/releases/download/v1.2.0/igpsport-map-updater-1.2.0-macos-arm64.dmg"},
+    {"name": "igpsport-map-updater-1.2.0-macos-arm64.tar.gz", "size": 43938658, "browser_download_url": "https://github.com/fernandoglatz/igpsport-map-updater/releases/download/v1.2.0/igpsport-map-updater-1.2.0-macos-arm64.tar.gz"},
+    {"name": "igpsport-map-updater-1.2.0-windows-x64.msi", "size": 47061671, "browser_download_url": "https://github.com/fernandoglatz/igpsport-map-updater/releases/download/v1.2.0/igpsport-map-updater-1.2.0-windows-x64.msi"},
+    {"name": "igpsport-map-updater-1.2.0-windows-x64.zip", "size": 46424571, "browser_download_url": "https://github.com/fernandoglatz/igpsport-map-updater/releases/download/v1.2.0/igpsport-map-updater-1.2.0-windows-x64.zip"}
+  ]
+}

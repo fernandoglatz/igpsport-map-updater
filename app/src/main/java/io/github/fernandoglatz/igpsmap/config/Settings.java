@@ -15,7 +15,7 @@ import java.util.Properties;
  * {@code Product} enum name) may be null.
  */
 public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cacheMaxAge, Path lastSourceFolder,
-                       boolean hdFallback, String lastProduct) {
+                       boolean hdFallback, String lastProduct, String skippedVersion) {
 
     /** Value of {@code threads} / {@code maxHeapGb} meaning "choose automatically". */
     public static final int AUTO = 0;
@@ -23,6 +23,12 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
     private static final int DEFAULT_CACHE_DAYS = 7;
     /** Retry a failed in-memory run in disk mode unless the user turned it off. */
     private static final boolean DEFAULT_HD_FALLBACK = true;
+
+    /** Settings without a skipped update version. */
+    public Settings(Path outputDir, int threads, int maxHeapGb, Duration cacheMaxAge, Path lastSourceFolder,
+                    boolean hdFallback, String lastProduct) {
+        this(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, lastProduct, null);
+    }
 
     public static Settings defaults(AppPaths paths) {
         return new Settings(paths.output(), AUTO, AUTO, Duration.ofDays(DEFAULT_CACHE_DAYS), null, DEFAULT_HD_FALLBACK, null);
@@ -42,6 +48,7 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
         String output = p.getProperty("outputDir");
         String last = p.getProperty("lastSourceFolder");
         String product = p.getProperty("lastProduct");
+        String skipped = p.getProperty("skippedVersion");
         return new Settings(
                 pathOr(output, defaults.outputDir()),
                 autoOrPositive(p.getProperty("threads")),
@@ -49,7 +56,8 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
                 Duration.ofDays(positiveInt(p.getProperty("cacheMaxAgeDays"), DEFAULT_CACHE_DAYS)),
                 pathOr(last, null),
                 booleanOr(p.getProperty("hdFallback"), DEFAULT_HD_FALLBACK),
-                product == null || product.isBlank() ? null : product.trim());
+                product == null || product.isBlank() ? null : product.trim(),
+                skipped == null || skipped.isBlank() ? null : skipped.trim());
     }
 
     public void save(Path file) throws IOException {
@@ -65,6 +73,9 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
         if (lastProduct != null) {
             p.setProperty("lastProduct", lastProduct);
         }
+        if (skippedVersion != null) {
+            p.setProperty("skippedVersion", skippedVersion);
+        }
         Files.createDirectories(file.toAbsolutePath().getParent());
         try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.ISO_8859_1)) {
             p.store(writer, "IGPSPORT Map Updater settings");
@@ -72,11 +83,15 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
     }
 
     public Settings withLastSourceFolder(Path folder) {
-        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, folder, hdFallback, lastProduct);
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, folder, hdFallback, lastProduct, skippedVersion);
     }
 
     public Settings withLastProduct(String product) {
-        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, product);
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, product, skippedVersion);
+    }
+
+    public Settings withSkippedVersion(String version) {
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, lastProduct, version);
     }
 
     private static boolean booleanOr(String value, boolean fallback) {

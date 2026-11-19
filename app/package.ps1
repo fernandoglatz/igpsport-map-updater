@@ -38,7 +38,11 @@ $Base = "$Release\$Artifact-$Version-windows-x64"
 foreach ($t in $Type) {
     $Out = "$Dist\$t"
     $Extra = @()
-    if ($t -eq "msi" -or $t -eq "exe") { $Extra = @("--win-menu", "--win-shortcut", "--win-dir-chooser") }
+    # The upgrade UUID must never change: it lets a new .msi replace the installed version (in-app updates).
+    # This is the value jpackage derived for v1.0.0 and v1.1.0.
+    if ($t -eq "msi" -or $t -eq "exe") {
+        $Extra = @("--win-menu", "--win-shortcut", "--win-dir-chooser", "--win-upgrade-uuid", "49a86519-a3be-3472-9700-e505b3df2b60")
+    }
 
     # Keep bin\java.exe in the runtime: osmosis runs in a child JVM started from the bundled runtime.
     Write-Host "Running jpackage (type: $t, version: $Version)..."
@@ -52,6 +56,7 @@ foreach ($t in $Type) {
         --main-jar $MainJar `
         --main-class $MainClass `
         --java-options "-Xmx1g" `
+        --java-options "-Digpsmap.package=$t" `
         --add-modules $Modules `
         --jlink-options "--strip-debug --no-man-pages --no-header-files" `
         --icon $Icon `

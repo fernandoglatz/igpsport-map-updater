@@ -65,6 +65,16 @@ class SettingsTest {
     }
 
     @Test
+    void skippedVersionRoundTrips() throws IOException {
+        Path file = dir.resolve("skip.properties");
+        Settings s = Settings.defaults(paths()).withSkippedVersion("1.2.0");
+        s.save(file);
+        assertEquals("1.2.0", Settings.load(file, paths()).skippedVersion());
+        assertNull(Settings.defaults(paths()).skippedVersion());
+        assertEquals(s.withSkippedVersion(null), Settings.defaults(paths()));
+    }
+
+    @Test
     void disabledRetryIsKept() throws IOException {
         Path file = dir.resolve("off.properties");
         Settings s = new Settings(dir.resolve("out"), Settings.AUTO, Settings.AUTO, Duration.ofDays(7), null, false, null);

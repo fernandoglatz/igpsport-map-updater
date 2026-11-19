@@ -9,6 +9,7 @@ A desktop app that regenerates the offline maps of IGPSPORT cycling computers fr
 - **Tunes itself**: picks the Mapsforge writer mode, threads and memory from each extract's size and your installed RAM, and retries in disk mode if memory runs out.
 - **Shows coverage**: every map on a world map, coloured by match status.
 - **Keeps IGPSPORT's file names**: output files are named the way the device expects, with the date of the OpenStreetMap data.
+- **Updates itself**: tells you when a new version is out and installs it from inside the app.
 
 ## Supported Products
 
@@ -46,6 +47,19 @@ Download the file for your system from the [latest release](https://github.com/f
 | macOS Apple Silicon | `.dmg` | `.tar.gz` |
 
 Java is bundled, so nothing else is needed. The macOS build isn't signed: on first launch, right-click the app and choose **Open**.
+
+### Updates
+
+At start-up the app checks GitHub for a newer release. If there is one, a bar at the top of the window shows it; **Update…** opens the release notes, a link to the releases page, and **Update** / **Later** / **Skip this version**. **Update** downloads the right file for how you installed the app:
+
+| Installed from | What Update does |
+|----------------|------------------|
+| Windows `.msi` | Starts the new installer, which replaces the old version, and closes the app. |
+| Linux `.deb` | Installs the package (asks for your password) and offers to restart the app. |
+| macOS `.dmg` | Opens the disk image so you can drag the app to Applications, and closes the app. |
+| Portable `.zip` / `.tar.gz` | Installs silently: replaces the app folder and restarts the app. Settings and maps are kept. |
+
+The window title shows the version you're running.
 
 ## How to Use
 

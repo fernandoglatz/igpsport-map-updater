@@ -31,6 +31,12 @@ import io.github.fernandoglatz.igpsmap.sources.GeofabrikRegion;
 import io.github.fernandoglatz.igpsmap.sources.OsmBoundarySource;
 import io.github.fernandoglatz.igpsmap.sources.OsmFrPolygonCrawler;
 import io.github.fernandoglatz.igpsmap.sources.PolyCandidate;
+import io.github.fernandoglatz.igpsmap.update.PackageType;
+import io.github.fernandoglatz.igpsmap.update.Platform;
+import io.github.fernandoglatz.igpsmap.update.ReleaseInfo;
+import io.github.fernandoglatz.igpsmap.update.UpdateChecker;
+import io.github.fernandoglatz.igpsmap.update.UpdateInstaller;
+import io.github.fernandoglatz.igpsmap.update.Version;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -195,6 +201,38 @@ public final class AppController {
         Set<String> seen = new HashSet<>();
         existing.forEach(j -> seen.add(j.map().name().regionKey()));
         return added.stream().filter(j -> seen.add(j.map().name().regionKey())).toList();
+    }
+
+    /** A newer release than the running version (and not skipped), or empty; empty also when run from source. */
+    public Optional<ReleaseInfo> checkForUpdate() throws IOException {
+        Optional<Version> current = Version.current();
+        if (current.isEmpty()) {
+            return Optional.empty();
+        }
+        cleanUpdates();
+        Optional<ReleaseInfo> latest = new UpdateChecker(fetcher, UpdateChecker.DEFAULT_API).latest();
+        return latest.flatMap(r -> UpdateChecker.newer(r, current.get(), settings.skippedVersion()));
+    }
+
+    /** The release file matching this installation, or empty when it must be downloaded by hand. */
+    public Optional<ReleaseInfo.Asset> updateAsset(ReleaseInfo release) {
+        return UpdateChecker.asset(release, PackageType.current(), Platform.current());
+    }
+
+    /** Removes downloaded installers of versions already installed (best effort). */
+    public void cleanUpdates() {
+        Version.current().ifPresent(v -> {
+            try {
+                updateInstaller().cleanUp(v);
+            } catch (IOException e) {
+                // leftover downloads are harmless
+            }
+        });
+    }
+
+    public UpdateInstaller updateInstaller() {
+        return new UpdateInstaller(fetcher, paths.updates(), UpdateInstaller.systemStarter(),
+                UpdateInstaller.Environment.current(paths.root()));
     }
 
     /** Forgets cached sources so the next match fetches fresh listings and polygons. */

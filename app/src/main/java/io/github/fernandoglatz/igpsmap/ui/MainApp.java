@@ -9,6 +9,10 @@ import io.github.fernandoglatz.igpsmap.device.UnsupportedDevice;
 import io.github.fernandoglatz.igpsmap.matching.MapJob;
 import io.github.fernandoglatz.igpsmap.pipeline.CancelToken;
 import io.github.fernandoglatz.igpsmap.pipeline.JobResult;
+import io.github.fernandoglatz.igpsmap.update.PackageType;
+import io.github.fernandoglatz.igpsmap.update.ReleaseInfo;
+import io.github.fernandoglatz.igpsmap.update.UpdateInstaller;
+import io.github.fernandoglatz.igpsmap.update.Version;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,6 +30,7 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -58,6 +63,7 @@ public final class MainApp extends Application {
     private final Button generate = new Button("Generate");
     private final Button edit = new Button("Edit match…");
     private final StackPane center = new StackPane();
+    private final HBox updateBanner = new HBox(8);
     private BorderPane reviewPane;
     private CancelToken cancelToken;
     /** Increments per match request so results of superseded requests are ignored. */
@@ -81,7 +87,10 @@ public final class MainApp extends Application {
             tabs.getSelectionModel().select(reviewTab);
             table.reveal(job);
         });
-        reviewPane = new BorderPane(tabs, sourceBar(), null, footer(), null);
+        updateBanner.getStyleClass().add("update-banner");
+        updateBanner.setVisible(false);
+        updateBanner.setManaged(false);
+        reviewPane = new BorderPane(tabs, new VBox(updateBanner, sourceBar()), null, footer(), null);
         center.getChildren().addAll(reviewPane, runView);
         runView.setVisible(false);
 
@@ -97,18 +106,148 @@ public final class MainApp extends Application {
             }
         });
         runView.back.setOnAction(e -> showReview());
-        runView.openOutput.setOnAction(e -> getHostServices().showDocument(
-                PathText.parse(outputDir.getText(), PathText.home()).toUri().toString()));
+        runView.openOutput.setOnAction(e -> openFolder(PathText.parse(outputDir.getText(), PathText.home())));
 
         Scene scene = new Scene(center, 1100, 700);
         scene.getStylesheets().add(MainApp.class.getResource("/ui/app.css").toExternalForm());
-        stage.setTitle("IGPSPORT Map Updater");
+        stage.setTitle(AppInfo.windowTitle(Version.current()));
         stage.getIcons().setAll(AppIcon.images());
         stage.setScene(scene);
         stage.show();
         updateGenerateButton();
         loadBaseMap();
         detectDevices();
+        checkForUpdate();
+    }
+
+    /** Asks GitHub for a newer release in the background; any failure leaves the window as it is. */
+    private void checkForUpdate() {
+        Task<Optional<ReleaseInfo>> task = new Task<>() {
+            @Override
+            protected Optional<ReleaseInfo> call() throws Exception {
+                return controller.checkForUpdate();
+            }
+        };
+        task.setOnSucceeded(e -> task.getValue().ifPresent(this::showUpdateBanner));
+        Thread thread = new Thread(task, "update-check");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void showUpdateBanner(ReleaseInfo release) {
+        Label text = new Label("Version " + release.version() + " is available. You have "
+                + Version.current().map(Version::toString).orElse("?") + ".");
+        Button open = new Button("Update…");
+        open.setDefaultButton(false);
+        open.setOnAction(e -> openUpdate(release));
+        Button close = new Button("✕");
+        close.getStyleClass().add("update-banner-close");
+        close.setTooltip(new javafx.scene.control.Tooltip("Hide until the next start"));
+        close.setOnAction(e -> hideUpdateBanner());
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        updateBanner.getChildren().setAll(text, open, spacer, close);
+        updateBanner.setVisible(true);
+        updateBanner.setManaged(true);
+    }
+
+    private void hideUpdateBanner() {
+        updateBanner.setVisible(false);
+        updateBanner.setManaged(false);
+    }
+
+    private void openUpdate(ReleaseInfo release) {
+        String current = Version.current().map(Version::toString).orElse("?");
+        UpdateDialog dialog = new UpdateDialog(stage, release, current, controller.updateAsset(release),
+                PackageType.current(), controller.updateInstaller(), url -> getHostServices().showDocument(url));
+        dialog.showAndWait().ifPresent(outcome -> {
+            if (outcome instanceof UpdateDialog.Skip) {
+                controller.updateSettings(controller.settings().withSkippedVersion(release.version().toString()));
+                hideUpdateBanner();
+            } else if (outcome instanceof UpdateDialog.Installed installed) {
+                afterHandoff(installed.handoff());
+            }
+        });
+    }
+
+    private void afterHandoff(UpdateInstaller.Handoff handoff) {
+        switch (handoff.next()) {
+            case EXIT_APP -> {
+                Alert alert = new Alert(Alert.AlertType.INFORMATION, handoff.message());
+                alert.initOwner(stage);
+                alert.setHeaderText("Updating IGPSPORT Map Updater");
+                alert.showAndWait();
+                Platform.exit();
+            }
+            case RESTARTING -> {
+                status.setText(handoff.message());
+                Platform.exit();
+                // The helper waits for this process to end; make sure it does even if a thread lingers.
+                Thread exit = new Thread(() -> {
+                    try {
+                        Thread.sleep(5_000);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                    System.exit(0);
+                }, "exit-for-update");
+                exit.setDaemon(true);
+                exit.start();
+            }
+            case OFFER_RESTART -> {
+                String appPath = System.getProperty("jpackage.app-path");
+                Alert alert = new Alert(Alert.AlertType.CONFIRMATION, handoff.message(),
+                        new javafx.scene.control.ButtonType("Restart now", javafx.scene.control.ButtonBar.ButtonData.OK_DONE),
+                        new javafx.scene.control.ButtonType("Later", javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE));
+                alert.initOwner(stage);
+                alert.setHeaderText("Update installed");
+                alert.showAndWait().filter(b -> b.getButtonData() == javafx.scene.control.ButtonBar.ButtonData.OK_DONE)
+                        .ifPresent(b -> restart(appPath));
+                hideUpdateBanner();
+            }
+            case SHOW_FOLDER -> {
+                // The folder opens only when asked: launching a file manager while the message appears
+                // can push the message out of sight.
+                TextArea text = new TextArea(handoff.message() + "\n\nFile: " + handoff.file().toAbsolutePath());
+                text.setEditable(false);
+                text.setWrapText(true);
+                text.setPrefRowCount(6);
+                javafx.scene.control.ButtonType openFolder =
+                        new javafx.scene.control.ButtonType("Open folder", javafx.scene.control.ButtonBar.ButtonData.OK_DONE);
+                Alert alert = new Alert(Alert.AlertType.INFORMATION, "", openFolder, javafx.scene.control.ButtonType.CLOSE);
+                alert.initOwner(stage);
+                alert.setTitle("Update");
+                alert.setHeaderText("New version downloaded");
+                alert.getDialogPane().setContent(text);
+                alert.getDialogPane().setPrefWidth(620);
+                alert.setResizable(true);
+                alert.showAndWait().filter(openFolder::equals).ifPresent(b ->
+                        openFolder(handoff.file().toAbsolutePath().getParent()));
+            }
+        }
+    }
+
+    /** Opens a folder in the file manager (not the browser, which HostServices uses on Windows). */
+    private void openFolder(Path folder) {
+        try {
+            FolderOpener.open(folder);
+        } catch (java.io.IOException | RuntimeException e) {
+            status.setText("Could not open " + folder + ": " + e.getMessage());
+        }
+    }
+
+    /** Starts the installed launcher again and closes this instance. */
+    private void restart(String appPath) {
+        if (appPath == null || appPath.isBlank()) {
+            status.setText("Restart the app to use the new version.");
+            return;
+        }
+        try {
+            UpdateInstaller.systemStarter().start(List.of(appPath));
+            Platform.exit();
+        } catch (java.io.IOException e) {
+            status.setText("Could not restart automatically: " + e.getMessage() + ". Restart the app to use the new version.");
+        }
     }
 
     private VBox sourceBar() {
@@ -162,7 +301,7 @@ public final class MainApp extends Application {
         openFolder.setOnAction(e -> {
             DetectedSource source = sources.getValue();
             if (source != null) {
-                getHostServices().showDocument(source.root().toUri().toString());
+                openFolder(source.root());
             }
         });
         Label folderTitle = new Label("Folder:");
@@ -232,7 +371,15 @@ public final class MainApp extends Application {
                 + "Double-click a row to change its polygon or PBF. Auto picks threads and memory from each "
                 + "extract's size and your installed RAM.");
         hint.getStyleClass().add("hint");
-        VBox box = new VBox(6, row, hint);
+        hint.setMinWidth(0);
+        Label version = new Label(AppInfo.versionLabel(Version.current()));
+        version.getStyleClass().add("hint");
+        version.setMinWidth(Region.USE_PREF_SIZE);
+        HBox.setHgrow(hint, Priority.ALWAYS);
+        hint.setMaxWidth(Double.MAX_VALUE);
+        HBox hintRow = new HBox(12, hint, version);
+        hintRow.setAlignment(Pos.CENTER_LEFT);
+        VBox box = new VBox(6, row, hintRow);
         box.setPadding(new Insets(8, 12, 10, 12));
         return box;
     }
@@ -437,7 +584,7 @@ public final class MainApp extends Application {
         }
         Settings settings = new Settings(output, autoValue(threads), autoValue(heap),
                 controller.settings().cacheMaxAge(), controller.settings().lastSourceFolder(),
-                hdFallback.isSelected(), controller.settings().lastProduct());
+                hdFallback.isSelected(), controller.settings().lastProduct(), controller.settings().skippedVersion());
         controller.updateSettings(settings);
         cancelToken = new CancelToken();
         CancelToken token = cancelToken;

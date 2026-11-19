@@ -40,6 +40,11 @@ public record AppPaths(Path root, Path settingsFile) {
         return root.resolve("originals");
     }
 
+    /** Downloaded app updates. */
+    public Path updates() {
+        return root.resolve("updates");
+    }
+
     public Path mapsCsv() {
         return root.resolve("maps.csv");
     }

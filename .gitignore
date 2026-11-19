@@ -4,6 +4,7 @@ tmp
 backup
 cache/
 originals/
+updates/
 app/target/
 docs/superpowers/
 .superpowers/

@@ -46,3 +46,15 @@
 .folder-path {
     -fx-text-fill: derive(-fx-text-base-color, 25%);
 }
+
+.update-banner {
+    -fx-background-color: #e3f1fb;
+    -fx-border-color: transparent transparent #9cc9ea transparent;
+    -fx-padding: 6 12 6 12;
+    -fx-alignment: center-left;
+}
+
+.update-banner-close {
+    -fx-background-color: transparent;
+    -fx-padding: 2 6 2 6;
+}

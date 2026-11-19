@@ -81,6 +81,7 @@ for TYPE in "${TYPES[@]}"; do
         --main-jar "$MAIN_JAR" \
         --main-class "$MAIN_CLASS" \
         --java-options "-Xmx1g" \
+        --java-options "-Digpsmap.package=$TYPE" \
         --add-modules "$MODULES" \
         --jlink-options "--strip-debug --no-man-pages --no-header-files" \
         --icon "$ICON" \
