@@ -24,6 +24,19 @@ class TagConfigTest {
     }
 
     @Test
+    void compatibilityProfileKeepsPathsAndExcludesWaterwaysDespiteGenericOverrides() throws IOException {
+        Path custom = dir.resolve("custom");
+        Files.createDirectories(custom);
+        Files.writeString(custom.resolve("tag-igpsport.xml"), "<enhanced-override/>");
+        TagFiles tags = TagConfig.resolve(List.of(custom), dir.resolve("tmp"), true);
+        String mapping = Files.readString(tags.tagConf());
+        String transforms = Files.readString(tags.transform());
+        assertTrue(mapping.contains("value=\"footway\"") && mapping.contains("value=\"path\""));
+        assertTrue(!mapping.contains("key=\"waterway\"") && !mapping.contains("enhanced-override"));
+        assertTrue(!transforms.contains("v=\"footway\"") && !transforms.contains("v=\"path\""));
+    }
+
+    @Test
     void overrideDirectoryWinsPerFile() throws IOException {
         Path custom = dir.resolve("custom");
         Files.createDirectories(custom);

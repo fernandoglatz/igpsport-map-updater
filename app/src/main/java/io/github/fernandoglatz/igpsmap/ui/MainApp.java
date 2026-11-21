@@ -62,6 +62,8 @@ public final class MainApp extends Application {
     private final ComboBox<Integer> threads = autoCombo(1, 16, "");
     private final ComboBox<Integer> heap = autoCombo(2, 64, " GB");
     private final CheckBox hdFallback = new CheckBox("Retry in disk mode if memory runs out");
+    private final CheckBox igs630Compatibility = new CheckBox("iGS630 compatibility");
+    private final CheckBox generateMd5 = new CheckBox("Create map_md5_list.cfg");
     private final Button generate = new Button("Generate");
     private final Button edit = new Button("Edit match…");
     private final Button viewMap = new Button("View map");
@@ -81,6 +83,8 @@ public final class MainApp extends Application {
         selectAutoValue(threads, settings.threads());
         selectAutoValue(heap, settings.maxHeapGb());
         hdFallback.setSelected(settings.hdFallback());
+        igs630Compatibility.setSelected(settings.igs630Compatibility());
+        generateMd5.setSelected(settings.generateMd5());
 
         javafx.scene.control.Tab reviewTab = new javafx.scene.control.Tab("Review", reviewContent());
         javafx.scene.control.Tab coverageTab = new javafx.scene.control.Tab("Coverage", coverage);
@@ -389,7 +393,15 @@ public final class MainApp extends Application {
         hint.setMaxWidth(Double.MAX_VALUE);
         HBox hintRow = new HBox(12, hint, version);
         hintRow.setAlignment(Pos.CENTER_LEFT);
-        VBox box = new VBox(6, row, hintRow);
+        igs630Compatibility.setTooltip(new javafx.scene.control.Tooltip(
+                "Use the conservative iGS630 tag set and compatible map metadata. Use original vendor maps as the source."));
+        generateMd5.setTooltip(new javafx.scene.control.Tooltip(
+                "After generation, calculate checksums for all main .map files in the output folder."));
+        Label profileHint = new Label("Use a fresh output folder when changing map profiles.");
+        profileHint.getStyleClass().add("hint");
+        HBox profileRow = new HBox(16, igs630Compatibility, generateMd5, profileHint);
+        profileRow.setAlignment(Pos.CENTER_LEFT);
+        VBox box = new VBox(6, row, profileRow, hintRow);
         box.setPadding(new Insets(8, 12, 10, 12));
         return box;
     }
@@ -606,7 +618,8 @@ public final class MainApp extends Application {
         }
         Settings settings = new Settings(output, autoValue(threads), autoValue(heap),
                 controller.settings().cacheMaxAge(), controller.settings().lastSourceFolder(),
-                hdFallback.isSelected(), controller.settings().lastProduct(), controller.settings().skippedVersion());
+                hdFallback.isSelected(), controller.settings().lastProduct(), controller.settings().skippedVersion(),
+                igs630Compatibility.isSelected(), generateMd5.isSelected());
         controller.updateSettings(settings);
         cancelToken = new CancelToken();
         CancelToken token = cancelToken;
@@ -627,7 +640,7 @@ public final class MainApp extends Application {
             if (!warnings.isEmpty()) {
                 Alert alert = new Alert(Alert.AlertType.WARNING, String.join("\n", warnings));
                 alert.initOwner(stage);
-                alert.setHeaderText("Memory mode failed for " + warnings.size() + (warnings.size() == 1 ? " map" : " maps"));
+                alert.setHeaderText("Generation warnings");
                 alert.setResizable(true);
                 alert.show();
             }

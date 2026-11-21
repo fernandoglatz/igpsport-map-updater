@@ -5,6 +5,8 @@ import io.github.fernandoglatz.igpsmap.config.Settings;
 import io.github.fernandoglatz.igpsmap.config.SystemMemory;
 import io.github.fernandoglatz.igpsmap.io.PbfDateReader;
 import io.github.fernandoglatz.igpsmap.io.PolyFile;
+import io.github.fernandoglatz.igpsmap.io.Igs630MapCompatibility;
+import io.github.fernandoglatz.igpsmap.io.MapMd5List;
 import io.github.fernandoglatz.igpsmap.matching.MapJob;
 import io.github.fernandoglatz.igpsmap.matching.PolySource;
 import io.github.fernandoglatz.igpsmap.net.HttpFetcher;
@@ -47,7 +49,29 @@ public final class GenerationService {
     public List<JobResult> runAll(List<MapJob> jobs, GenerationListener listener, CancelToken cancel) {
         cancel.bind(Thread.currentThread());
         try {
-            return runJobs(jobs, listener, cancel);
+            List<JobResult> results = runJobs(jobs, listener, cancel);
+            if (settings.generateMd5() && results.stream().anyMatch(r -> r.status() == JobResult.Status.SUCCESS)) {
+                try {
+                    if (cancel.isCancelled()) throw new CancellationException("Generation cancelled; MD5 list was not updated");
+                    listener.onStep("Updating map_md5_list.cfg");
+                    List<Path> references = jobs.stream().map(j -> j.map().path().toAbsolutePath().getParent()
+                            .resolve(MapMd5List.FILE_NAME)).distinct().toList();
+                    Path md5 = MapMd5List.write(settings.outputDir(), references, cancel::isCancelled);
+                    listener.onLog("Updated checksums: " + md5);
+                } catch (IOException | CancellationException e) {
+                    String warning = "Could not update map_md5_list.cfg: " + e.getMessage();
+                    listener.onLog("WARNING: " + warning);
+                    for (int i = results.size() - 1; i >= 0; i--) {
+                        JobResult result = results.get(i);
+                        if (result.status() == JobResult.Status.SUCCESS) {
+                            results.set(i, new JobResult(result.job(), result.status(), result.output(), result.message(),
+                                    result.warning() == null ? warning : result.warning() + " " + warning));
+                            break;
+                        }
+                    }
+                }
+            }
+            return results;
         } finally {
             cancel.unbind();
             Thread.interrupted(); // a cancel may have interrupted this thread; don't leak the flag
@@ -80,13 +104,21 @@ public final class GenerationService {
             Files.createDirectories(paths.tmp());
             Files.deleteIfExists(tmpMap);
 
+            if (settings.igs630Compatibility()) {
+                // Fail before large downloads if the selected template is not a complete map.
+                Igs630MapCompatibility.readCreatedBy(job.map().path());
+                listener.onLog("Map profile: iGS630 compatibility");
+            } else {
+                listener.onLog("Map profile: enhanced");
+            }
+
             listener.onStep("Downloading PBF");
             Path pbf = ensurePbf(job.pbfUrl(), listener, cancel);
 
             listener.onStep("Preparing polygon");
             Path poly = ensurePoly(job, cancel);
 
-            TagFiles tags = TagConfig.resolve(tagOverrideDirs, paths.tmp());
+            TagFiles tags = TagConfig.resolve(tagOverrideDirs, paths.tmp(), settings.igs630Compatibility());
             listener.onStep("Running osmosis");
             listener.onProgress(-1);
             long pbfBytes = Files.size(pbf);
@@ -120,6 +152,10 @@ public final class GenerationService {
                 return new JobResult(job, JobResult.Status.FAILED, null, "osmosis produced no file", warning);
             }
 
+            if (settings.igs630Compatibility()) {
+                listener.onStep("Applying iGS630 map metadata");
+                Igs630MapCompatibility.patch(job.map().path(), tmpMap);
+            }
             listener.onStep("Renaming");
             Path output = MapRenamer.rename(tmpMap, job.map().name(), PbfDateReader.resolveDate(pbf), settings.outputDir());
             return new JobResult(job, JobResult.Status.SUCCESS, output, "Generated " + output.getFileName(), warning);

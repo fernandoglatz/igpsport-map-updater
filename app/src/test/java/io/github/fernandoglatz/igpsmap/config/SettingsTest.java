@@ -32,6 +32,20 @@ class SettingsTest {
         assertNull(s.lastSourceFolder());
         assertTrue(s.hdFallback());
         assertNull(s.lastProduct());
+        assertTrue(s.igs630Compatibility());
+        assertTrue(s.generateMd5());
+    }
+
+    @Test
+    void generationOptionsRoundTripAndSurviveOtherChanges() throws IOException {
+        Settings s = Settings.defaults(paths()).withGenerationOptions(false, true)
+                .withLastSourceFolder(dir).withLastProduct("IGS630").withSkippedVersion("1.2.1");
+        Path file = dir.resolve("options.properties");
+        s.save(file);
+        Settings loaded = Settings.load(file, paths());
+        assertEquals(s, loaded);
+        assertFalse(loaded.igs630Compatibility());
+        assertTrue(loaded.generateMd5());
     }
 
     @Test
@@ -62,6 +76,8 @@ class SettingsTest {
         assertEquals(12, s.maxHeapGb());
         assertTrue(s.hdFallback(), "files saved before the option existed get the default (on)");
         assertNull(s.lastProduct());
+        assertTrue(s.igs630Compatibility(), "existing installations migrate to the conservative profile");
+        assertTrue(s.generateMd5());
     }
 
     @Test

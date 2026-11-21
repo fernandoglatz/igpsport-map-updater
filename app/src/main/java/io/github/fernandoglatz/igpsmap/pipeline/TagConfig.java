@@ -20,6 +20,15 @@ public final class TagConfig {
         return new TagFiles(resolveOne(TAG_CONF, overrideDirs, tmpDir), resolveOne(TRANSFORM, overrideDirs, tmpDir));
     }
 
+    public static TagFiles resolve(List<Path> overrideDirs, Path tmpDir, boolean igs630Compatibility) throws IOException {
+        if (!igs630Compatibility) {
+            return resolve(overrideDirs, tmpDir);
+        }
+        // Generic enhanced overrides must not silently re-enable unsupported tags.
+        return new TagFiles(resolveOne("tag-igpsport-igs630.xml", overrideDirs, tmpDir),
+                resolveOne("tag-igpsport-igs630-transform.xml", overrideDirs, tmpDir));
+    }
+
     private static Path resolveOne(String name, List<Path> overrideDirs, Path tmpDir) throws IOException {
         for (Path dir : overrideDirs) {
             Path candidate = dir.resolve(name);

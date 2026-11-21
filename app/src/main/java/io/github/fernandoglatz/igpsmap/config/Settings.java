@@ -15,7 +15,8 @@ import java.util.Properties;
  * {@code Product} enum name) may be null.
  */
 public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cacheMaxAge, Path lastSourceFolder,
-                       boolean hdFallback, String lastProduct, String skippedVersion) {
+                       boolean hdFallback, String lastProduct, String skippedVersion,
+                       boolean igs630Compatibility, boolean generateMd5) {
 
     /** Value of {@code threads} / {@code maxHeapGb} meaning "choose automatically". */
     public static final int AUTO = 0;
@@ -30,8 +31,15 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
         this(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, lastProduct, null);
     }
 
+    /** Legacy programmatic settings retain the original pipeline behavior. */
+    public Settings(Path outputDir, int threads, int maxHeapGb, Duration cacheMaxAge, Path lastSourceFolder,
+                    boolean hdFallback, String lastProduct, String skippedVersion) {
+        this(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, lastProduct, skippedVersion, false, false);
+    }
+
     public static Settings defaults(AppPaths paths) {
-        return new Settings(paths.output(), AUTO, AUTO, Duration.ofDays(DEFAULT_CACHE_DAYS), null, DEFAULT_HD_FALLBACK, null);
+        return new Settings(paths.output(), AUTO, AUTO, Duration.ofDays(DEFAULT_CACHE_DAYS), null, DEFAULT_HD_FALLBACK,
+                null, null, true, true);
     }
 
     public static Settings load(Path file, AppPaths paths) {
@@ -57,7 +65,9 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
                 pathOr(last, null),
                 booleanOr(p.getProperty("hdFallback"), DEFAULT_HD_FALLBACK),
                 product == null || product.isBlank() ? null : product.trim(),
-                skipped == null || skipped.isBlank() ? null : skipped.trim());
+                skipped == null || skipped.isBlank() ? null : skipped.trim(),
+                booleanOr(p.getProperty("igs630Compatibility"), true),
+                booleanOr(p.getProperty("generateMd5"), true));
     }
 
     public void save(Path file) throws IOException {
@@ -67,6 +77,8 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
         p.setProperty("maxHeapGb", autoText(maxHeapGb));
         p.setProperty("cacheMaxAgeDays", Long.toString(cacheMaxAge.toDays()));
         p.setProperty("hdFallback", Boolean.toString(hdFallback));
+        p.setProperty("igs630Compatibility", Boolean.toString(igs630Compatibility));
+        p.setProperty("generateMd5", Boolean.toString(generateMd5));
         if (lastSourceFolder != null) {
             p.setProperty("lastSourceFolder", lastSourceFolder.toString());
         }
@@ -83,15 +95,23 @@ public record Settings(Path outputDir, int threads, int maxHeapGb, Duration cach
     }
 
     public Settings withLastSourceFolder(Path folder) {
-        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, folder, hdFallback, lastProduct, skippedVersion);
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, folder, hdFallback, lastProduct, skippedVersion,
+                igs630Compatibility, generateMd5);
     }
 
     public Settings withLastProduct(String product) {
-        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, product, skippedVersion);
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, product, skippedVersion,
+                igs630Compatibility, generateMd5);
     }
 
     public Settings withSkippedVersion(String version) {
-        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, lastProduct, version);
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, lastProduct, version,
+                igs630Compatibility, generateMd5);
+    }
+
+    public Settings withGenerationOptions(boolean compatibility, boolean md5) {
+        return new Settings(outputDir, threads, maxHeapGb, cacheMaxAge, lastSourceFolder, hdFallback, lastProduct,
+                skippedVersion, compatibility, md5);
     }
 
     private static boolean booleanOr(String value, boolean fallback) {

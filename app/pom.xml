@@ -119,6 +119,12 @@
 
         <!-- Test only: write a tiny PBF fixture with osmosis itself. -->
         <dependency>
+            <groupId>com.github.mapsforge.mapsforge</groupId>
+            <artifactId>mapsforge-map-reader</artifactId>
+            <version>${mapsforge.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.openstreetmap.osmosis</groupId>
             <artifactId>osmosis-pbf</artifactId>
             <version>${osmosis.version}</version>
