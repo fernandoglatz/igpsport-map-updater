@@ -2,6 +2,7 @@ package io.github.fernandoglatz.igpsmap.catalog;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -115,6 +116,53 @@ class OfficialMapDownloaderTest {
             assertEquals(List.of(original), files.filter(Files::isRegularFile)
                     .filter(p -> !p.toString().contains(".fetched")).toList());
         }
+    }
+
+    @Test
+    void downloadsRawMapsAtUuidUrlsUsingTheirContentDisposition() throws IOException {
+        String[] names = {"BJ00002611153692XU01Y045.map", "MA00002511202UA2H80AV0BD.map",
+                "AZ00002611153Y22BW04E03O.map", "GE00002503173V02AR04C02K.map",
+                "BM000026111520K2JX00I00H.map", "ES35002611152TT2LP04302S.map"};
+        for (int i = 0; i < names.length; i++) {
+            String name = names[i];
+            String route = "/uuid-" + i;
+            server.handle(route, ex -> {
+                ex.getResponseHeaders().add("Content-Disposition", "attachment; filename=\"" + name + "\"");
+                StubServer.sendRange(ex, MAP_BYTES);
+            });
+            OfficialMapDownloader.Result result = downloader.fetch(node("Raw " + i, route), Product.IGS630, (d,t) -> { });
+            assertNull(result.error(), result.error());
+            assertEquals(name, result.maps().get(0).getFileName().toString());
+            assertArrayEquals(MAP_BYTES, Files.readAllBytes(result.maps().get(0)));
+        }
+    }
+
+    @Test
+    void rawMapProbeWorksWhenServerIgnoresRangeAndUsesEncodedFilename() throws IOException {
+        String name = "ES35002611152TT2LP04302S.map";
+        server.handle("/encoded-uuid", ex -> {
+            ex.getResponseHeaders().add("Content-Disposition", "attachment; filename*=UTF-8''" + name);
+            StubServer.send(ex, 200, MAP_BYTES);
+        });
+        var result = downloader.fetch(node("Encoded", "/encoded-uuid"), Product.IGS630, (d,t) -> { });
+        assertNull(result.error(), result.error());
+        assertEquals(name, result.maps().get(0).getFileName().toString());
+    }
+
+    @Test
+    void unsafeOrMissingRawMapFilenameIsRejected() {
+        server.handle("/bad-uuid", ex -> {
+            ex.getResponseHeaders().add("Content-Disposition", "attachment; filename=\"../../settings.properties\"");
+            StubServer.sendRange(ex, MAP_BYTES);
+        });
+        var result = downloader.fetch(node("Bad", "/bad-uuid"), Product.IGS630, (d,t) -> { });
+        assertEquals(List.of(), result.maps());
+        assertTrue(result.error().contains("unexpected map file name"));
+        assertFalse(Files.exists(dir.resolve("settings.properties")));
+        server.handle("/unnamed-uuid", ex -> StubServer.sendRange(ex, MAP_BYTES));
+        var unnamed = downloader.fetch(node("Unnamed", "/unnamed-uuid"), Product.IGS630, (d,t) -> { });
+        assertEquals(List.of(), unnamed.maps());
+        assertTrue(unnamed.error().contains("unexpected map file name"));
     }
 
     @Test

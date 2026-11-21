@@ -151,6 +151,39 @@ class MatcherTest {
     }
 
     @Test
+    void britishVendorCodeUsesGbAndKeepsTheUkFilename() throws IOException {
+        GeofabrikIndex world = worldIndex();
+        String filename = "UK0100260112" + GeoCode.encode(new BoundingBox(51.4, -0.3, 51.7, 0.1)) + ".map";
+        AtomicInteger calls = new AtomicInteger();
+        MapJob job = new Matcher(world, c -> List.of(), code -> {
+            assertEquals("GB", code);
+            calls.incrementAndGet();
+            return List.of();
+        }, List.of()).match(detected(filename));
+        assertTrue(job.runnable());
+        assertTrue(job.pbfUrl().getPath().contains("united-kingdom"));
+        assertEquals(filename, job.map().name().toFileName());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void canaryMapsUseTheSpecialExtractInsteadOfMainlandSpain() throws IOException {
+        MapJob job = new Matcher(worldIndex(), c -> List.of(), List.of()).match(detected(
+                "ES0400260112" + GeoCode.encode(new BoundingBox(27.2, -18.3, 29.8, -13.1)) + ".map"));
+        assertTrue(job.runnable());
+        assertEquals(URI.create("https://g/africa/canary-islands-latest.osm.pbf"), job.pbfUrl());
+        var regions = worldIndex().subtree("spain");
+        Geometry seaMargins = PolyFile.parse(PolyFile.fromBoundingBox(new BoundingBox(26, -20, 31, -11), "islands"));
+        assertEquals("canary-islands", Matcher.choosePbfRegion(regions, seaMargins, regions.get(0)).id());
+    }
+
+    private static GeofabrikIndex worldIndex() throws IOException {
+        try (InputStream in = MatcherTest.class.getResourceAsStream("/geofabrik-world-mini.json")) {
+            return GeofabrikIndex.parse(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
     void unknownCountryIsUnmatched() {
         MapJob job = matcher(List.of(), List.of()).match(detected("ZZ01002601122B83FO00N00E.map"));
         assertEquals(Confidence.UNMATCHED, job.confidence());

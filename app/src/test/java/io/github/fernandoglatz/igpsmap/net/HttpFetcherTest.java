@@ -24,6 +24,13 @@ import org.junit.jupiter.api.io.TempDir;
 
 class HttpFetcherTest {
 
+    @Test
+    void decodesDispositionNamesWithoutTreatingPlusAsSpace() {
+        assertEquals("AB+file.map", HttpFetcher.dispositionFileName("attachment; filename*=UTF-8''AB+file%2Emap"));
+        assertEquals("fallback.map", HttpFetcher.dispositionFileName("attachment; filename*=UTF-8''%ZZ; filename=\"fallback.map\""));
+        assertEquals(null, HttpFetcher.dispositionFileName("attachment"));
+    }
+
     private static final byte[] BODY = new byte[1000];
 
     static {

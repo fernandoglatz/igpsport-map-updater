@@ -90,6 +90,18 @@ class OfficialCatalogTest {
     }
 
     @Test
+    void brazilAggregateIsAGroupAndRegionalDownloadsRemainSelectable() throws IOException {
+        for (String version : List.of("V1", "V2")) {
+            CatalogNode country = OfficialCatalog.parse("""
+                    {"code":0,"data":[{"name":"Brazil","mapPathUrl":"https://h/Mapinfo/%s/BR0000.zip",
+                     "subList":[{"name":"State","mapPathUrl":"https://h/BR0100.zip"}]}]}
+                    """.formatted(version)).get(0);
+            assertFalse(country.downloadable());
+            assertEquals(List.of("State"), CatalogNode.leaves(List.of(country)).stream().map(CatalogNode::name).toList());
+        }
+    }
+
+    @Test
     void standaloneSlovakiaPackagesAreNotHidden() throws IOException {
         CatalogNode node = OfficialCatalog.parse("""
                 {"code":0,"data":[{"name":"Slovakia","mapPathUrl":"https://cdn.example/Mapinfo/V1/SL0000.zip"}]}

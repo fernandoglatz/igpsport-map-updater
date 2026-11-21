@@ -82,9 +82,9 @@ public final class OfficialCatalog {
             long size = Math.max(0, number(o, "mapSize", 0));
             String version = text(o, "mapVersion");
             URI download = uri(link);
-            // V1/V2 advertise a nonexistent Slovakia aggregate; its regions work.
+            // V1/V2 advertise nonexistent Slovakia/Brazil aggregates; regions work.
             if (!children.isEmpty() && download != null
-                    && download.getPath().matches("/Mapinfo/V[12]/SL0000\\.zip")) {
+                    && download.getPath().matches("/Mapinfo/V[12]/(?:SL|BR)0000\\.zip")) {
                 download = null;
             }
             // The old catalogs link Liechtenstein to Israel. Use the verified V3
