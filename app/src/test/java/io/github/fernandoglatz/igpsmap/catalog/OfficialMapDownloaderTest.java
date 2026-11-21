@@ -97,6 +97,27 @@ class OfficialMapDownloaderTest {
     }
 
     @Test
+    void igs630CanUseOnlyTheMainMapOfTheLiechtensteinV3Template() throws IOException {
+        String main = "LI00002608233BR27S004007.map";
+        byte[] archive = zip(Map.of(
+                "LI00/Maps/" + main, MAP_BYTES,
+                "LI00/Maps/LI00A026082307H04Z000000.map", new byte[] {1, 2},
+                "LI00/Router/LI0000E.rtd", new byte[] {3, 4}));
+        server.handle("/liechtenstein-template", ex -> StubServer.sendRange(ex, archive));
+        OfficialMapDownloader.Result result = downloader.fetch(node("Liechtenstein", "/liechtenstein-template"),
+                Product.IGS630, (d, t) -> { });
+
+        assertNull(result.error());
+        Path original = dir.resolve("originals").resolve(Product.IGS630.catalogId()).resolve(main);
+        assertEquals(List.of(original), result.maps());
+        assertArrayEquals(MAP_BYTES, Files.readAllBytes(original));
+        try (Stream<Path> files = Files.walk(original.getParent())) {
+            assertEquals(List.of(original), files.filter(Files::isRegularFile)
+                    .filter(p -> !p.toString().contains(".fetched")).toList());
+        }
+    }
+
+    @Test
     void reusesMapsDownloadedBefore() throws IOException {
         byte[] zip = fr94();
         server.handle("/FR94.zip", ex -> StubServer.sendRange(ex, zip));
