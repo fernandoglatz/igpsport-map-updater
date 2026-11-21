@@ -64,7 +64,10 @@ public final class Matcher {
             return fromCsv(map, row.get());
         }
 
-        Optional<GeofabrikRegion> country = index.country(name.countryCode());
+        // iGPSPORT uses SL for Slovakia; OSM sources use the ISO code SK.
+        // Preserve the vendor code in filenames and region identities.
+        String isoCountryCode = "SL".equals(name.countryCode()) ? "SK" : name.countryCode();
+        Optional<GeofabrikRegion> country = index.country(isoCountryCode);
         if (country.isEmpty()) {
             return new MapJob(map, null, null, null, Confidence.UNMATCHED, 0, List.of(), List.of(),
                     "No Geofabrik extract for country code " + name.countryCode());
@@ -91,7 +94,7 @@ public final class Matcher {
         java.util.Set<PolyCandidate> boundaryCandidates = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         if (ranked.isEmpty() || Confidence.fromScore(score(target, ranked.get(0).tileBox())) != Confidence.HIGH) {
             try {
-                List<PolyCandidate> found = boundaries.forCountry(name.countryCode());
+                List<PolyCandidate> found = boundaries.forCountry(isoCountryCode);
                 boundaryCandidates.addAll(found);
                 all.addAll(found);
                 ranked = rank(all, target);

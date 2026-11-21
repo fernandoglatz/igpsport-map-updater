@@ -1,6 +1,7 @@
 package io.github.fernandoglatz.igpsmap.sources;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -61,6 +62,31 @@ class GeofabrikIndexTest {
                  "geometry":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,2],[0,0]]]}}]}
                 """;
         assertEquals(4.0, GeofabrikIndex.parse(json).country("PT").orElseThrow().area(), 1e-9);
+    }
+
+    @Test
+    void parsesScalarCountryCodeAndNullOptionalMetadata() {
+        String json = """
+                {"type":"FeatureCollection","features":[{"type":"Feature",
+                 "properties":{"id":"portugal","name":null,"parent":null,"iso3166-1:alpha2":"PT",
+                 "urls":{"pbf":"https://example.com/portugal-latest.osm.pbf"}},
+                 "geometry":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,2],[0,0]]]}}]}
+                """;
+        GeofabrikRegion country = GeofabrikIndex.parse(json).country("PT").orElseThrow();
+        assertEquals("portugal", country.name());
+        assertEquals(List.of("PT"), country.iso2());
+        assertNull(country.parent());
+    }
+
+    @Test
+    void nullCountryCodeIsNotAnInvalidIndex() {
+        String json = """
+                {"type":"FeatureCollection","features":[{"type":"Feature",
+                 "properties":{"id":"region","iso3166-1:alpha2":null,
+                 "urls":{"pbf":"https://example.com/region-latest.osm.pbf"}},
+                 "geometry":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,2],[0,0]]]}}]}
+                """;
+        assertEquals(List.of(), GeofabrikIndex.parse(json).regions().get(0).iso2());
     }
 
     @Test

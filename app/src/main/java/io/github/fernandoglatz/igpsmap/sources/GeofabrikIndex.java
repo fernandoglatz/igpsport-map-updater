@@ -42,13 +42,18 @@ public final class GeofabrikIndex {
                     continue;
                 }
                 List<String> iso = new ArrayList<>();
-                if (props.has("iso3166-1:alpha2")) {
-                    props.getAsJsonArray("iso3166-1:alpha2").forEach(e -> iso.add(e.getAsString()));
+                JsonElement isoCodes = props.get("iso3166-1:alpha2");
+                if (isoCodes != null && !isoCodes.isJsonNull()) {
+                    if (isoCodes.isJsonArray()) {
+                        isoCodes.getAsJsonArray().forEach(e -> iso.add(e.getAsString()));
+                    } else {
+                        iso.add(isoCodes.getAsString());
+                    }
                 }
                 regions.add(new GeofabrikRegion(
                         props.get("id").getAsString(),
-                        props.has("parent") ? props.get("parent").getAsString() : null,
-                        props.has("name") ? props.get("name").getAsString() : props.get("id").getAsString(),
+                        props.has("parent") && !props.get("parent").isJsonNull() ? props.get("parent").getAsString() : null,
+                        props.has("name") && !props.get("name").isJsonNull() ? props.get("name").getAsString() : props.get("id").getAsString(),
                         List.copyOf(iso),
                         URI.create(urls.get("pbf").getAsString()),
                         GeoJson.geometry(feature.getAsJsonObject("geometry"))));

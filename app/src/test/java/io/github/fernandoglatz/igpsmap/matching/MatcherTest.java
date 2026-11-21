@@ -121,6 +121,36 @@ class MatcherTest {
     }
 
     @Test
+    void slovakVendorCodeUsesSlovakiaForBothSourcesAndPreservesFilename() {
+        GeofabrikIndex countries = GeofabrikIndex.parse("""
+                {"features":[
+                  {"properties":{"id":"slovakia","iso3166-1:alpha2":["SK"],
+                    "urls":{"pbf":"https://example.com/slovakia-latest.osm.pbf"}},
+                   "geometry":{"type":"Polygon","coordinates":[[[16,47],[23,47],[23,50],[16,50],[16,47]]]}},
+                  {"properties":{"id":"sierra-leone","iso3166-1:alpha2":["SL"],
+                    "urls":{"pbf":"https://example.com/sierra-leone-latest.osm.pbf"}},
+                   "geometry":{"type":"Polygon","coordinates":[[[-13,6],[-10,6],[-10,10],[-13,10],[-13,6]]]}}
+                ]}
+                """);
+        String filename = "SL0100260112" + GeoCode.encode(new BoundingBox(48.1, 17.0, 48.3, 17.3)) + ".map";
+        AtomicInteger boundaryCalls = new AtomicInteger();
+        MapJob job = new Matcher(countries, country -> {
+            assertEquals("slovakia", country.id());
+            return List.of();
+        }, code -> {
+            boundaryCalls.incrementAndGet();
+            assertEquals("SK", code);
+            return List.of();
+        }, List.of()).match(detected(filename));
+
+        assertTrue(job.runnable());
+        assertEquals(URI.create("https://example.com/slovakia-latest.osm.pbf"), job.pbfUrl());
+        assertEquals(1, boundaryCalls.get());
+        assertEquals("SL", job.map().name().countryCode());
+        assertEquals(filename, job.map().name().toFileName());
+    }
+
+    @Test
     void unknownCountryIsUnmatched() {
         MapJob job = matcher(List.of(), List.of()).match(detected("ZZ01002601122B83FO00N00E.map"));
         assertEquals(Confidence.UNMATCHED, job.confidence());
