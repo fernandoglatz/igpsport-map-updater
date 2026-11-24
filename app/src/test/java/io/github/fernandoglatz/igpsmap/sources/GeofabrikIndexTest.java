@@ -64,6 +64,22 @@ class GeofabrikIndexTest {
     }
 
     @Test
+    void aNullParentOrNameIsTreatedAsMissing() {
+        // Since November 2026 Geofabrik's index sends "parent": null for some top-level regions.
+        String json = """
+                {"type":"FeatureCollection","features":[{"type":"Feature",
+                 "properties":{"id":"p","parent":null,"name":null,"iso3166-1:alpha2":["PT"],
+                  "urls":{"pbf":"https://x/europe/p-latest.osm.pbf"}},
+                 "geometry":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,2],[0,0]]]}}]}
+                """;
+
+        GeofabrikRegion region = GeofabrikIndex.parse(json).country("PT").orElseThrow();
+
+        assertEquals(null, region.parent());
+        assertEquals("p", region.name());
+    }
+
+    @Test
     void rejectsInvalidJson() {
         assertThrows(IllegalArgumentException.class, () -> GeofabrikIndex.parse("<html>oops</html>"));
     }

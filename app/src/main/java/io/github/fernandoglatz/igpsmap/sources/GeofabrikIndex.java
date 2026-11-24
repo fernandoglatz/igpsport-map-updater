@@ -47,8 +47,8 @@ public final class GeofabrikIndex {
                 }
                 regions.add(new GeofabrikRegion(
                         props.get("id").getAsString(),
-                        props.has("parent") ? props.get("parent").getAsString() : null,
-                        props.has("name") ? props.get("name").getAsString() : props.get("id").getAsString(),
+                        optionalString(props, "parent"),
+                        Optional.ofNullable(optionalString(props, "name")).orElse(props.get("id").getAsString()),
                         List.copyOf(iso),
                         URI.create(urls.get("pbf").getAsString()),
                         GeoJson.geometry(feature.getAsJsonObject("geometry"))));
@@ -57,6 +57,12 @@ public final class GeofabrikIndex {
         } catch (JsonParseException | IllegalStateException | NullPointerException | ClassCastException e) {
             throw new IllegalArgumentException("Invalid Geofabrik index", e);
         }
+    }
+
+    /** The property as a string, or null when it is absent or JSON null (Geofabrik sends both). */
+    private static String optionalString(JsonObject props, String key) {
+        JsonElement value = props.get(key);
+        return value == null || value.isJsonNull() ? null : value.getAsString();
     }
 
     public List<GeofabrikRegion> regions() {

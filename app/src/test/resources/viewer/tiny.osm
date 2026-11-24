@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6" generator="test">
+  <node id="1" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.800" lon="-47.900"/>
+  <node id="2" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.790" lon="-47.880"/>
+  <node id="3" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.780" lon="-47.860"/>
+  <node id="4" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.800" lon="-47.870"/>
+  <node id="5" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.780" lon="-47.890"/>
+  <node id="11" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.795" lon="-47.875"/>
+  <node id="12" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.795" lon="-47.865"/>
+  <node id="13" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.785" lon="-47.865"/>
+  <node id="14" version="1" timestamp="2026-01-12T00:00:00Z" lat="-15.785" lon="-47.875"/>
+  <way id="10" version="1" timestamp="2026-01-12T00:00:00Z"><nd ref="1"/><nd ref="2"/><nd ref="3"/><tag k="highway" v="primary"/></way>
+  <way id="20" version="1" timestamp="2026-01-12T00:00:00Z"><nd ref="4"/><nd ref="2"/><nd ref="5"/><tag k="highway" v="residential"/></way>
+  <way id="30" version="1" timestamp="2026-01-12T00:00:00Z"><nd ref="11"/><nd ref="12"/><nd ref="13"/><nd ref="14"/><nd ref="11"/><tag k="natural" v="water"/></way>
+</osm>

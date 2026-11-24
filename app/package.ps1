@@ -40,8 +40,10 @@ foreach ($t in $Type) {
     $Extra = @()
     # The upgrade UUID must never change: it lets a new .msi replace the installed version (in-app updates).
     # This is the value jpackage derived for v1.0.0 and v1.1.0.
+    # packaging\windows\main.wxs adds a "Launch" checkbox to the installer's last page.
     if ($t -eq "msi" -or $t -eq "exe") {
-        $Extra = @("--win-menu", "--win-shortcut", "--win-dir-chooser", "--win-upgrade-uuid", "49a86519-a3be-3472-9700-e505b3df2b60")
+        $Extra = @("--win-menu", "--win-shortcut", "--win-dir-chooser", "--win-upgrade-uuid", "49a86519-a3be-3472-9700-e505b3df2b60",
+            "--resource-dir", "$AppDir\packaging\windows")
     }
 
     # Keep bin\java.exe in the runtime: osmosis runs in a child JVM started from the bundled runtime.

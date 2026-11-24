@@ -69,4 +69,30 @@ class ViewportTest {
         assertEquals(x + 30, v.screenX(-50), 1e-6);
         assertEquals(y - 10, v.screenY(-20), 1e-6);
     }
+    @Test
+    void aViewerViewportCanZoomFurtherThanTheDefault() {
+        Viewport v = new Viewport(Viewport.MAX_SCALE * 8);
+        v.fit(new BoundingBox(-34, -74, 5, -34), 800, 600);
+        for (int i = 0; i < 100; i++) {
+            v.zoomAt(400, 300, 2.0);
+        }
+        assertEquals(Viewport.MAX_SCALE * 8, v.scale(), 1e-6);
+    }
+
+    @Test
+    void maximumScaleBelowTheMinimumIsRejected() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> new Viewport(Viewport.MIN_SCALE / 2));
+    }
+
+    @Test
+    void convertsBetweenWorldAndScreenCoordinates() {
+        Viewport v = new Viewport();
+        v.fit(new BoundingBox(-34, -74, 5, -34), 800, 600);
+
+        assertEquals(v.screenX(-50), v.screenXOfWorld(Viewport.worldX(-50)), 1e-9);
+        assertEquals(v.screenY(-20), v.screenYOfWorld(Viewport.worldY(-20)), 1e-9);
+        assertEquals(Viewport.worldX(-50), v.worldXAt(v.screenX(-50)), 1e-12);
+        assertEquals(Viewport.worldY(-20), v.worldYAt(v.screenY(-20)), 1e-12);
+    }
 }

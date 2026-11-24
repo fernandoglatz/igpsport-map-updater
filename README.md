@@ -8,6 +8,7 @@ A desktop app that regenerates the offline maps of IGPSPORT cycling computers fr
 - **Adds maps you don't have**: downloads original maps from iGPSPORT's official catalog for your device, so you can regenerate regions that aren't on it.
 - **Tunes itself**: picks the Mapsforge writer mode, threads and memory from each extract's size and your installed RAM, and retries in disk mode if memory runs out.
 - **Shows coverage**: every map on a world map, coloured by match status.
+- **Compares maps**: shows an original map next to the one generated from it, panning and zooming together.
 - **Keeps IGPSPORT's file names**: output files are named the way the device expects, with the date of the OpenStreetMap data.
 - **Updates itself**: tells you when a new version is out and installs it from inside the app.
 
@@ -81,6 +82,8 @@ The window title shows the version you're running.
 
    ![Coverage tab: the maps of an iGS630S on a world map](misc/app-coverage.png)
 
+   *The same 265 maps across 39 countries: 259 matched, 5 partial and 1 bounding box (DE06).*
+
 3. **Add maps that aren't on your device** (optional). **Add maps…** opens iGPSPORT's official map catalog for your device. **Product** is preselected from the connected device's name (or the last one you used); filter by name and check the regions you want. Regions already in the list are greyed out. Only the main `.map` file is downloaded out of each official package, not its routing or contour files. The new maps are matched and added to the list like the device's own. It also works with no device connected.
 
    ![Add official maps dialog with the iGS630S catalog](misc/app-add-maps.png)
@@ -97,7 +100,13 @@ The window title shows the version you're running.
 
    *Regenerating Guyana from the iGS630S: Auto picked the in-memory writer with 2 threads and a heap of up to 80% of the machine's 9.7 GB.*
 
-5. **Copy the files** from the output folder to the device's `iGPSPORT/Maps/` folder, replacing the old ones.
+5. **Check the result** (optional). Select a map in **Review** and press **View map**. The **Map viewer** tab shows the original on the left and the newest map generated from it (from the output folder) on the right. Scroll or double-click to zoom and drag to move; both maps move together. Without a generated map, only the original is shown, so you can also use it to look at a map as it is.
+
+   ![Map viewer: the 2023 Distrito Federal map next to the one generated in 2026](misc/app-viewer.png)
+
+   *Brasília at zoom 14: the original 2023 map from an iGS630S (left) and the map generated from it in 2026 (right). The new map has cycle paths (blue), more streets and newer roads.*
+
+6. **Copy the files** from the output folder to the device's `iGPSPORT/Maps/` folder, replacing the old ones.
 
 Confirmed matches are saved to `maps.csv`, so the next run starts from them.
 
@@ -205,13 +214,15 @@ The GEOCODE consists of 4 parts, each 3 characters in Base36:
 
 ## Viewing and Comparing Maps
 
-[Cruiser](https://wiki.openstreetmap.org/wiki/Cruiser) is a cross-platform map viewer that opens Mapsforge `.map` files. Use it to check generated maps before copying them to the device, or to compare them with the originals.
+The **Map viewer** tab (see [How to Use](#how-to-use), step 5) shows an original and its generated map side by side. It draws them with [Mapsforge](https://github.com/mapsforge/mapsforge)'s default style, the engine Cruiser is built on, so colours differ from the device's screen.
 
-Below is a comparison between an original IGPSPORT map (left) and a generated one (right):
+[Cruiser](https://wiki.openstreetmap.org/wiki/Cruiser) is a stand-alone, cross-platform map viewer that opens Mapsforge `.map` files, if you want more styles or to open any map file.
 
-![Map Comparison - Original vs Enhanced](misc/compare-2023-to-2026.jpg)
+Below is a closer look at the Distrito Federal map from step 5, an original IGPSPORT map (left) and the one generated from it (right):
 
-*Left: Original map (2023) | Right: Enhanced map (2026)*
+![Map viewer at zoom 16: the Nelson Piquet racetrack only appears in the generated map](misc/app-viewer-detail.png)
+
+*Left: original map (2023) | Right: generated map (2026). The Autódromo Nelson Piquet in Brasília is tagged `highway=raceway`, which the original maps leave out; the [tag transformation](#tag-transformations-tag-igpsport-transformxml) turns it into a road, so it shows up on the device.*
 
 ## Troubleshooting
 
