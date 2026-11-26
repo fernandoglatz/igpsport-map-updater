@@ -58,3 +58,10 @@
     -fx-background-color: transparent;
     -fx-padding: 2 6 2 6;
 }
+
+.map-message {
+    -fx-text-fill: #5a554c;
+    -fx-font-size: 13px;
+    -fx-text-alignment: center;
+    -fx-padding: 16;
+}

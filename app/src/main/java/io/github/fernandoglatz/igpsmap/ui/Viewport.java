@@ -15,9 +15,22 @@ final class Viewport {
     private static final double MAX_LAT = 85.05112878;
     private static final double FIT_MARGIN = 0.9;
 
+    private final double maxScale;
     private double scale = MIN_SCALE;
     private double offsetX;
     private double offsetY;
+
+    Viewport() {
+        this(MAX_SCALE);
+    }
+
+    /** A viewport that can zoom in up to {@code maxScale} (pixels per world width). */
+    Viewport(double maxScale) {
+        if (maxScale < MIN_SCALE) {
+            throw new IllegalArgumentException("Maximum scale below the minimum: " + maxScale);
+        }
+        this.maxScale = maxScale;
+    }
 
     static double worldX(double lon) {
         return (lon + 180.0) / 360.0;
@@ -47,6 +60,22 @@ final class Viewport {
 
     double screenY(double lat) {
         return offsetY + worldY(lat) * scale;
+    }
+
+    double screenXOfWorld(double worldX) {
+        return offsetX + worldX * scale;
+    }
+
+    double screenYOfWorld(double worldY) {
+        return offsetY + worldY * scale;
+    }
+
+    double worldXAt(double screenX) {
+        return (screenX - offsetX) / scale;
+    }
+
+    double worldYAt(double screenY) {
+        return (screenY - offsetY) / scale;
     }
 
     double lonAt(double screenX) {
@@ -81,7 +110,7 @@ final class Viewport {
         offsetY += dy;
     }
 
-    private static double clamp(double s) {
-        return Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
+    private double clamp(double s) {
+        return Math.max(MIN_SCALE, Math.min(maxScale, s));
     }
 }

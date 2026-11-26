@@ -50,6 +50,8 @@ public final class MainApp extends Application {
     private final ComboBox<DetectedSource> sources = new ComboBox<>();
     private final ReviewTable table = new ReviewTable();
     private final CoverageView coverage = new CoverageView();
+    private final MapViewerView viewer = new MapViewerView();
+    private javafx.scene.control.Tab viewerTab;
     private final javafx.scene.control.TabPane tabs = new javafx.scene.control.TabPane();
     private final RunView runView = new RunView();
     private final Label status = new Label("Looking for IGPSPORT devices…");
@@ -62,6 +64,7 @@ public final class MainApp extends Application {
     private final CheckBox hdFallback = new CheckBox("Retry in disk mode if memory runs out");
     private final Button generate = new Button("Generate");
     private final Button edit = new Button("Edit match…");
+    private final Button viewMap = new Button("View map");
     private final StackPane center = new StackPane();
     private final HBox updateBanner = new HBox(8);
     private BorderPane reviewPane;
@@ -81,7 +84,8 @@ public final class MainApp extends Application {
 
         javafx.scene.control.Tab reviewTab = new javafx.scene.control.Tab("Review", reviewContent());
         javafx.scene.control.Tab coverageTab = new javafx.scene.control.Tab("Coverage", coverage);
-        tabs.getTabs().addAll(reviewTab, coverageTab);
+        viewerTab = new javafx.scene.control.Tab("Map viewer", viewer);
+        tabs.getTabs().addAll(reviewTab, coverageTab, viewerTab);
         tabs.setTabClosingPolicy(javafx.scene.control.TabPane.TabClosingPolicy.UNAVAILABLE);
         coverage.setOnOpen(job -> {
             tabs.getSelectionModel().select(reviewTab);
@@ -331,11 +335,17 @@ public final class MainApp extends Application {
         Button uncheckAll = new Button("Uncheck all");
         uncheckAll.setOnAction(e -> table.setAllSelected(false));
         edit.setOnAction(e -> table.editSelected());
+        viewMap.setTooltip(new javafx.scene.control.Tooltip(
+                "Show the selected original map next to the map generated from it"));
+        viewMap.setDisable(true);
+        viewMap.setOnAction(e -> table.selectedJob().ifPresent(this::viewMap));
+        table.getSelectionModel().selectedItemProperty().addListener((obs, old, item) ->
+                viewMap.setDisable(table.selectedJob().isEmpty()));
         Button addMaps = new Button("Add maps…");
         addMaps.setTooltip(new javafx.scene.control.Tooltip(
                 "Download original maps from the official iGPSPORT catalog, e.g. regions not on the device"));
         addMaps.setOnAction(e -> openAddMaps());
-        HBox toolbar = new HBox(8, checkAll, uncheckAll, edit, addMaps);
+        HBox toolbar = new HBox(8, checkAll, uncheckAll, edit, viewMap, addMaps);
         toolbar.setAlignment(Pos.CENTER_LEFT);
         toolbar.setPadding(new Insets(6, 8, 6, 8));
         return new BorderPane(table, toolbar, null, null, null);
@@ -568,6 +578,18 @@ public final class MainApp extends Application {
         thread.start();
     }
 
+    /** Opens the map viewer with the job's original map and the map generated from it, if any. */
+    private void viewMap(MapJob job) {
+        Path output;
+        try {
+            output = PathText.parse(outputDir.getText(), PathText.home()).toAbsolutePath();
+        } catch (java.nio.file.InvalidPathException e) {
+            output = null; // the viewer then shows only the original
+        }
+        viewer.show(job.map(), output);
+        tabs.getSelectionModel().select(viewerTab);
+    }
+
     private void startGeneration() {
         List<MapJob> selected = table.selectedJobs();
         if (selected.isEmpty()) {
@@ -671,6 +693,7 @@ public final class MainApp extends Application {
         if (cancelToken != null) {
             cancelToken.cancel();
         }
+        viewer.dispose();
         controller.shutdown();
         Platform.exit();
     }

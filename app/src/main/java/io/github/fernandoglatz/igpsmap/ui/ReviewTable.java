@@ -206,6 +206,13 @@ final class ReviewTable extends TreeTableView<JobRow> {
         }
     }
 
+    /** The job of the selected row; empty when nothing or a country row is selected. */
+    java.util.Optional<MapJob> selectedJob() {
+        TreeItem<JobRow> item = getSelectionModel().getSelectedItem();
+        return item == null || item.getValue().isGroup() ? java.util.Optional.empty()
+                : java.util.Optional.of(item.getValue().job.get());
+    }
+
     /** Opens the editor for the selected row, if any. */
     void editSelected() {
         TreeItem<JobRow> item = getSelectionModel().getSelectedItem();
