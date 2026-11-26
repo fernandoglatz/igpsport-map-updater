@@ -57,7 +57,7 @@ class GenerationServiceTest {
         });
         server.handle("/polygons/df.poly", ex -> StubServer.send(ex, 200, POLY.getBytes(StandardCharsets.US_ASCII)));
         paths = AppPaths.detect(dir, "Linux", dir.resolve("home"), Map.of());
-        settings = Settings.defaults(paths);
+        settings = Settings.defaults(paths).withGenerationOptions(false, false);
     }
 
     @AfterEach
@@ -137,6 +137,55 @@ class GenerationServiceTest {
         try (Stream<Path> files = Files.list(paths.output())) {
             return files.map(p -> p.getFileName().toString()).sorted().toList();
         }
+    }
+
+    @Test
+    void compatibilityPatchRunsBeforeFinalMd5AndUsesOriginalReferenceVersion() throws Exception {
+        MapJob job = job("BR01002303102B83FO00N00E.map", remotePoly());
+        Files.createDirectories(job.map().path().getParent());
+        Files.write(job.map().path(), MapFixtures.completeMap("originalQ"));
+        Files.writeString(job.map().path().getParent().resolve("map_md5_list.cfg"), "MAP_NUM:432\r\nMAP_VER:137\r\n");
+        settings = settings.withGenerationOptions(true, true);
+        ProcessRunner writer = (cmd, lines, cancel) -> {
+            commands.add(cmd);
+            assertTrue(cmd.stream().anyMatch(a -> a.endsWith("tag-igpsport-igs630.xml")));
+            String output = cmd.get(cmd.indexOf("--mapfile-writer") + 1).substring(5);
+            Files.write(Path.of(output), MapFixtures.completeMap("writer-master-SNAPSHOT"));
+            return 0;
+        };
+        JobResult result = service(writer).runAll(List.of(job), new RecordingListener(), new CancelToken()).get(0);
+        assertEquals(JobResult.Status.SUCCESS, result.status(), result.message());
+        assertEquals("originalQ", new String(io.github.fernandoglatz.igpsmap.io.Igs630MapCompatibility.readCreatedBy(result.output()),
+                StandardCharsets.UTF_8));
+        String expected = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("MD5")
+                .digest(Files.readAllBytes(result.output())));
+        String cfg = Files.readString(settings.outputDir().resolve("map_md5_list.cfg"));
+        assertTrue(cfg.startsWith("MAP_NUM:1\r\nMAP_VER:137\r\n"));
+        assertTrue(cfg.contains(result.output().getFileName().toString().replace(".map", "") + ":" + expected + "\r\n"));
+    }
+
+    @Test
+    void checksumWriteFailureIsReportedAsWarningWithoutDiscardingTheMap() throws IOException {
+        settings = settings.withGenerationOptions(false, true);
+        Path blocker = settings.outputDir().resolve("map_md5_list.cfg");
+        Files.createDirectories(blocker);
+        Files.writeString(blocker.resolve("keep"), "do not delete");
+        JobResult result = service(fakeOsmosis(-1, true)).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken()).get(0);
+        assertEquals(JobResult.Status.SUCCESS, result.status());
+        assertTrue(Files.exists(result.output()));
+        assertTrue(result.warning().contains("map_md5_list.cfg"));
+        assertTrue(Files.exists(blocker.resolve("keep")));
+    }
+
+    @Test
+    void invalidCompatibilitySourceFailsBeforeDownloadingOrWriting() {
+        settings = settings.withGenerationOptions(true, true);
+        JobResult result = service(fakeOsmosis(-1, true)).runAll(
+                List.of(job("BR01002303102B83FO00N00E.map", remotePoly())), new RecordingListener(), new CancelToken()).get(0);
+        assertEquals(JobResult.Status.FAILED, result.status());
+        assertTrue(commands.isEmpty());
+        assertFalse(Files.exists(settings.outputDir().resolve("map_md5_list.cfg")));
     }
 
     @Test

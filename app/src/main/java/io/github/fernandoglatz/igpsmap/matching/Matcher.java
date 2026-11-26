@@ -64,7 +64,14 @@ public final class Matcher {
             return fromCsv(map, row.get());
         }
 
-        Optional<GeofabrikRegion> country = index.country(name.countryCode());
+        // iGPSPORT uses SL for Slovakia; OSM sources use the ISO code SK.
+        // Preserve the vendor code in filenames and region identities.
+        String isoCountryCode = switch (name.countryCode()) {
+            case "SL" -> "SK";
+            case "UK" -> "GB";
+            default -> name.countryCode();
+        };
+        Optional<GeofabrikRegion> country = index.country(isoCountryCode);
         if (country.isEmpty()) {
             return new MapJob(map, null, null, null, Confidence.UNMATCHED, 0, List.of(), List.of(),
                     "No Geofabrik extract for country code " + name.countryCode());
@@ -91,7 +98,7 @@ public final class Matcher {
         java.util.Set<PolyCandidate> boundaryCandidates = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         if (ranked.isEmpty() || Confidence.fromScore(score(target, ranked.get(0).tileBox())) != Confidence.HIGH) {
             try {
-                List<PolyCandidate> found = boundaries.forCountry(name.countryCode());
+                List<PolyCandidate> found = boundaries.forCountry(isoCountryCode);
                 boundaryCandidates.addAll(found);
                 all.addAll(found);
                 ranked = rank(all, target);
@@ -141,9 +148,15 @@ public final class Matcher {
 
     /** The smallest region whose (slightly buffered) outline covers the polygon; else the country. */
     public static GeofabrikRegion choosePbfRegion(List<GeofabrikRegion> subtree, Geometry poly, GeofabrikRegion country) {
-        return subtree.stream()
+        Optional<GeofabrikRegion> covering = subtree.stream()
                 .filter(r -> r.geometry().buffer(COVER_BUFFER).covers(poly))
-                .min(Comparator.comparingDouble(GeofabrikRegion::area))
+                .min(Comparator.comparingDouble(GeofabrikRegion::area));
+        if (covering.isPresent()) return covering.get();
+        // Preserve the whole-country fallback when a tile spans several states.
+        // Overseas special regions (e.g. the Canaries) lie outside that geometry.
+        if (country.geometry().buffer(COVER_BUFFER).intersects(poly)) return country;
+        return subtree.stream().filter(r -> r.geometry().intersects(poly))
+                .max(Comparator.comparingDouble(r -> r.geometry().intersection(poly).getArea()))
                 .orElse(country);
     }
 

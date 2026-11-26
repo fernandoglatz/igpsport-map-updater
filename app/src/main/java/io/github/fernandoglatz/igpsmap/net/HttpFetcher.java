@@ -17,6 +17,9 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
+import java.util.Arrays;
+import java.net.URLDecoder;
+import java.util.regex.Pattern;
 
 /** Small HTTP helper: text GET, HEAD Last-Modified and resumable file downloads. */
 public final class HttpFetcher {
@@ -148,6 +151,29 @@ public final class HttpFetcher {
      * the whole file, which is then in {@code body}.
      */
     public record RangeResult(byte[] body, long totalSize, boolean partial) {
+    }
+
+    public record DownloadInfo(boolean mapsforge, String fileName) { }
+
+    /** Inspect only the magic bytes; UUID URLs may hold raw maps instead of ZIPs. */
+    public DownloadInfo inspectDownload(URI uri) throws IOException {
+        HttpResponse<InputStream> response = send(request(uri).GET().header("Range", "bytes=0-19").build(),
+                HttpResponse.BodyHandlers.ofInputStream());
+        try (InputStream body = response.body()) {
+            requireSuccess(uri, response.statusCode());
+            boolean map = Arrays.equals(body.readNBytes(20), "mapsforge binary OSM".getBytes(StandardCharsets.US_ASCII));
+            return new DownloadInfo(map, dispositionFileName(response.headers().firstValue("Content-Disposition").orElse("")));
+        }
+    }
+
+    static String dispositionFileName(String value) {
+        var encoded = Pattern.compile("(?i)(?:^|;)\\s*filename\\*\\s*=\\s*\"?UTF-8''([^;\"]+)").matcher(value);
+        if (encoded.find()) {
+            try { return URLDecoder.decode(encoded.group(1).strip().replace("+", "%2B"), StandardCharsets.UTF_8); }
+            catch (IllegalArgumentException ignored) { /* try the plain fallback */ }
+        }
+        var plain = Pattern.compile("(?i)(?:^|;)\\s*filename\\s*=\\s*(?:\"([^\"]*)\"|([^;]*))").matcher(value);
+        return plain.find() ? (plain.group(1) != null ? plain.group(1) : plain.group(2)).strip() : null;
     }
 
     /** GET with {@code Range: bytes=<spec>}, e.g. {@code "-65536"} (last bytes) or {@code "100-199"}. */

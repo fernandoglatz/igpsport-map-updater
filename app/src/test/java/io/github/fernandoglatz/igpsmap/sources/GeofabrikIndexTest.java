@@ -1,6 +1,7 @@
 package io.github.fernandoglatz.igpsmap.sources;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,6 +65,31 @@ class GeofabrikIndexTest {
     }
 
     @Test
+    void parsesScalarCountryCodeAndNullOptionalMetadata() {
+        String json = """
+                {"type":"FeatureCollection","features":[{"type":"Feature",
+                 "properties":{"id":"portugal","name":null,"parent":null,"iso3166-1:alpha2":"PT",
+                 "urls":{"pbf":"https://example.com/portugal-latest.osm.pbf"}},
+                 "geometry":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,2],[0,0]]]}}]}
+                """;
+        GeofabrikRegion country = GeofabrikIndex.parse(json).country("PT").orElseThrow();
+        assertEquals("portugal", country.name());
+        assertEquals(List.of("PT"), country.iso2());
+        assertNull(country.parent());
+    }
+
+    @Test
+    void nullCountryCodeIsNotAnInvalidIndex() {
+        String json = """
+                {"type":"FeatureCollection","features":[{"type":"Feature",
+                 "properties":{"id":"region","iso3166-1:alpha2":null,
+                 "urls":{"pbf":"https://example.com/region-latest.osm.pbf"}},
+                 "geometry":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,2],[0,0]]]}}]}
+                """;
+        assertEquals(List.of(), GeofabrikIndex.parse(json).regions().get(0).iso2());
+    }
+
+    @Test
     void aNullParentOrNameIsTreatedAsMissing() {
         // Since November 2026 Geofabrik's index sends "parent": null for some top-level regions.
         String json = """
@@ -77,6 +103,40 @@ class GeofabrikIndexTest {
 
         assertEquals(null, region.parent());
         assertEquals("p", region.name());
+    }
+
+    @Test
+    void splitsCombinedIsoValuesInBothScalarAndArrayFields() throws IOException {
+        GeofabrikIndex world = worldIndex();
+        for (String code : List.of("QA", "AE", "OM", "BH", "KW")) {
+            assertEquals("gcc-states", world.country(code).orElseThrow().id());
+        }
+        for (String code : List.of("MY", "SG", "BN")) {
+            assertEquals(List.of("MY", "SG", "BN"), world.country(code).orElseThrow().iso2());
+        }
+        assertEquals("israel-and-palestine", world.country("IL").orElseThrow().id());
+        assertEquals("israel-and-palestine", world.country("PS").orElseThrow().id());
+        assertEquals("haiti-and-domrep", world.country("DO").orElseThrow().id());
+    }
+
+    @Test
+    void resolvesSharedExtractsWithoutIsoMetadata() throws IOException {
+        GeofabrikIndex world = worldIndex();
+        String[][] cases = {{"JE","guernsey-jersey"},{"RE","reunion"},{"BM","bermuda"},
+                {"MP","american-oceania"},{"SA","gcc-states"},{"AW","central-america"},{"TT","central-america"}};
+        for (String[] entry : cases) assertEquals(entry[1], world.country(entry[0]).orElseThrow().id());
+    }
+
+    @Test
+    void specialRegionsOutsideTheParentTreeAreIncludedWithoutCycles() throws IOException {
+        assertEquals(List.of("spain", "canary-islands"),
+                worldIndex().subtree("spain").stream().map(GeofabrikRegion::id).toList());
+    }
+
+    private static GeofabrikIndex worldIndex() throws IOException {
+        try (InputStream in = GeofabrikIndexTest.class.getResourceAsStream("/geofabrik-world-mini.json")) {
+            return GeofabrikIndex.parse(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+        }
     }
 
     @Test

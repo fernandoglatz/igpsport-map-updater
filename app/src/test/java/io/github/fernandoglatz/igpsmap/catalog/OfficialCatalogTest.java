@@ -73,6 +73,69 @@ class OfficialCatalogTest {
     }
 
     @Test
+    void slovakiaAggregateGroupsItsRegionsWithoutDownloadingTheMissingPackage() throws IOException {
+        for (String version : List.of("V1", "V2")) {
+            String json = """
+                    {"code":0,"data":[{"id":"sk","name":"Slovakia",
+                    "mapPathUrl":"https://cdn.example/Mapinfo/%s/SL0000.zip","subList":[
+                      {"id":"sk1","name":"Banska Bystrica","mapPathUrl":"https://cdn.example/SL0100.zip"},
+                      {"id":"sk2","name":"Bratislava","mapPathUrl":"https://cdn.example/SL0200.zip"}
+                    ]}]}
+                    """.formatted(version);
+            CatalogNode country = OfficialCatalog.parse(json).get(0);
+            assertFalse(country.downloadable());
+            assertEquals(List.of("Banska Bystrica", "Bratislava"),
+                    CatalogNode.leaves(List.of(country)).stream().map(CatalogNode::name).toList());
+        }
+    }
+
+    @Test
+    void brazilAggregateIsAGroupAndRegionalDownloadsRemainSelectable() throws IOException {
+        for (String version : List.of("V1", "V2")) {
+            CatalogNode country = OfficialCatalog.parse("""
+                    {"code":0,"data":[{"name":"Brazil","mapPathUrl":"https://h/Mapinfo/%s/BR0000.zip",
+                     "subList":[{"name":"State","mapPathUrl":"https://h/BR0100.zip"}]}]}
+                    """.formatted(version)).get(0);
+            assertFalse(country.downloadable());
+            assertEquals(List.of("State"), CatalogNode.leaves(List.of(country)).stream().map(CatalogNode::name).toList());
+        }
+    }
+
+    @Test
+    void standaloneSlovakiaPackagesAreNotHidden() throws IOException {
+        CatalogNode node = OfficialCatalog.parse("""
+                {"code":0,"data":[{"name":"Slovakia","mapPathUrl":"https://cdn.example/Mapinfo/V1/SL0000.zip"}]}
+                """).get(0);
+        assertTrue(node.downloadable());
+    }
+
+    @Test
+    void wrongLiechtensteinLinkUsesTheVerifiedGenerationTemplate() throws IOException {
+        CatalogNode node = OfficialCatalog.parse("""
+                {"code":0,"data":[{"id":"li","name":"Liechtenstein","mapSize":265485,"mapVersion":"230310",
+                 "mapPathUrl":"https://cdn.example/Mapinfo/asia/IL00002303103RF2JE01202W.map"}]}
+                """).get(0);
+        assertEquals(URI.create("https://qw20191008.oss-us-west-1.aliyuncs.com/8325946d-bcc5-4d00-8a74-67602f23140a"), node.url());
+        assertEquals(1628052, node.size());
+        assertEquals("20260823", node.version());
+        assertEquals("li", node.id());
+        assertEquals(List.of("Liechtenstein"), node.path());
+    }
+
+    @Test
+    void validLiechtensteinAndIsraelEntriesAreNotRewritten() throws IOException {
+        List<CatalogNode> nodes = OfficialCatalog.parse("""
+                {"code":0,"data":[
+                 {"name":"Liechtenstein","mapPathUrl":"https://cdn.example/LI0000.zip","mapVersion":"new"},
+                 {"name":"Israel","mapPathUrl":"https://cdn.example/Mapinfo/asia/IL00002303103RF2JE01202W.map"}
+                ]}
+                """);
+        assertEquals(URI.create("https://cdn.example/Mapinfo/asia/IL00002303103RF2JE01202W.map"), nodes.get(0).url());
+        assertEquals(URI.create("https://cdn.example/LI0000.zip"), nodes.get(1).url());
+        assertEquals("new", nodes.get(1).version());
+    }
+
+    @Test
     void apiErrorsAreReported() {
         IOException e = assertThrows(IOException.class,
                 () -> OfficialCatalog.parse("{\"code\":401,\"msg\":\"login required\",\"data\":null}"));

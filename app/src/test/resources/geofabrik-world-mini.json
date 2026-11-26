@@ -1,0 +1,14 @@
+{"type":"FeatureCollection","features":[
+ {"properties":{"id":"spain","iso3166-1:alpha2":"ES","special_regions":["canary-islands","spain","missing"],"urls":{"pbf":"https://g/europe/spain-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[-10,35],[5,35],[5,44],[-10,44],[-10,35]]]}},
+ {"properties":{"id":"canary-islands","parent":"africa","special_regions":["spain"],"urls":{"pbf":"https://g/africa/canary-islands-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[-19,27],[-12,27],[-12,30],[-19,30],[-19,27]]]}},
+ {"properties":{"id":"gcc-states","iso3166-1:alpha2":"QA,AE,OM,BH,KW","urls":{"pbf":"https://g/asia/gcc-states-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[34,15],[61,15],[61,33],[34,33],[34,15]]]}},
+ {"properties":{"id":"malaysia-singapore-brunei","iso3166-1:alpha2":[" MY, SG ","BN","MY",null],"urls":{"pbf":"https://g/asia/malaysia-singapore-brunei-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[99,-1],[120,-1],[120,8],[99,8],[99,-1]]]}},
+ {"properties":{"id":"israel-and-palestine","iso3166-1:alpha2":"PS,IL","urls":{"pbf":"https://g/asia/israel-and-palestine-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[34,29],[36,29],[36,34],[34,34],[34,29]]]}},
+ {"properties":{"id":"haiti-and-domrep","iso3166-1:alpha2":"HT,DO","urls":{"pbf":"https://g/central-america/haiti-and-domrep-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[-75,17],[-68,17],[-68,21],[-75,21],[-75,17]]]}},
+ {"properties":{"id":"united-kingdom","iso3166-1:alpha2":"GB","urls":{"pbf":"https://g/europe/united-kingdom-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[-8,49],[2,49],[2,61],[-8,61],[-8,49]]]}},
+ {"properties":{"id":"guernsey-jersey","urls":{"pbf":"https://g/europe/guernsey-jersey-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[-3,49],[-1.5,49],[-1.5,50],[-3,50],[-3,49]]]}},
+ {"properties":{"id":"reunion","urls":{"pbf":"https://g/africa/reunion-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[55,-22],[56,-22],[56,-20],[55,-20],[55,-22]]]}},
+ {"properties":{"id":"bermuda","urls":{"pbf":"https://g/europe/bermuda-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[-65.5,32],[-64,32],[-64,33],[-65.5,33],[-65.5,32]]]}},
+ {"properties":{"id":"american-oceania","urls":{"pbf":"https://g/australia-oceania/american-oceania-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[140,12],[150,12],[150,23],[140,23],[140,12]]]}},
+ {"properties":{"id":"central-america","urls":{"pbf":"https://g/central-america-latest.osm.pbf"}},"geometry":{"type":"Polygon","coordinates":[[[-100,3],[-44,3],[-44,28],[-100,28],[-100,3]]]}}
+]}

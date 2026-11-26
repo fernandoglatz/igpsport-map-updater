@@ -80,7 +80,23 @@ public final class OfficialCatalog {
                 link = text(o, "fileUrl");
             }
             long size = Math.max(0, number(o, "mapSize", 0));
-            result.add(new CatalogNode(text(o, "id"), name, path, size, text(o, "mapVersion"), uri(link), children));
+            String version = text(o, "mapVersion");
+            URI download = uri(link);
+            // V1/V2 advertise nonexistent Slovakia/Brazil aggregates; regions work.
+            if (!children.isEmpty() && download != null
+                    && download.getPath().matches("/Mapinfo/V[12]/(?:SL|BR)0000\\.zip")) {
+                download = null;
+            }
+            // The old catalogs link Liechtenstein to Israel. Use the verified V3
+            // package as a filename/bounds template, not as a device-ready map.
+            // Only its main map passes OfficialMapDownloader's filename filter.
+            if ("Liechtenstein".equalsIgnoreCase(name) && download != null
+                    && download.getPath().equals("/Mapinfo/asia/IL00002303103RF2JE01202W.map")) {
+                download = URI.create("https://qw20191008.oss-us-west-1.aliyuncs.com/8325946d-bcc5-4d00-8a74-67602f23140a");
+                size = 1628052;
+                version = "20260823";
+            }
+            result.add(new CatalogNode(text(o, "id"), name, path, size, version, download, children));
         }
         result.sort(BY_NAME);
         return result;

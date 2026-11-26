@@ -49,8 +49,20 @@ public final class OfficialMapDownloader {
             if (cached != null) {
                 return new Result(node, cached, null);
             }
-            List<Path> maps = isBareMap(node.url()) ? List.of(downloadMap(node, dir, progress))
-                    : fromPackage(node, dir, progress);
+            List<Path> maps;
+            if (isBareMap(node.url())) {
+                maps = List.of(downloadMap(node, dir, RemoteZip.baseName(node.url().getPath()), progress));
+            } else if (node.url().getPath().toLowerCase(Locale.ROOT).endsWith(".zip")) {
+                maps = fromPackage(node, dir, progress);
+            } else {
+                HttpFetcher.DownloadInfo info = fetcher.inspectDownload(node.url());
+                if (info.mapsforge()) {
+                    String name = info.fileName() == null ? "" : RemoteZip.baseName(info.fileName());
+                    maps = List.of(downloadMap(node, dir, name, progress));
+                } else {
+                    maps = fromPackage(node, dir, progress);
+                }
+            }
             if (maps.isEmpty()) {
                 return new Result(node, List.of(), "No usable map in " + node.name());
             }
@@ -63,8 +75,7 @@ public final class OfficialMapDownloader {
         }
     }
 
-    private Path downloadMap(CatalogNode node, Path dir, ProgressListener progress) throws IOException {
-        String name = RemoteZip.baseName(node.url().getPath());
+    private Path downloadMap(CatalogNode node, Path dir, String name, ProgressListener progress) throws IOException {
         if (MapFileName.parse(name).isEmpty()) {
             throw new IOException("unexpected map file name " + name);
         }
