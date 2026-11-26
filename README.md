@@ -94,6 +94,10 @@ The window title shows the version you're running.
 
 4. **Press Generate.** Downloads, conversion and renaming run one map at a time, with progress, MB/s and a log. **Cancel** stops cleanly.
 
+   **iGS630 compatibility** (on by default) uses a conservative tag profile and adjusts the generated map's creator metadata for the iGS630. Use original vendor maps as the source, and a fresh output folder when changing profiles. This profile has been tested on an iGS630; other devices may need their own verification.
+
+   **Create map_md5_list.cfg** (on by default) writes checksums for all main `.map` files in the output folder after generation, including the final compatibility adjustments. It preserves `MAP_VER` from an existing output list or the original source list, falling back to `130`. Copy the new list together with its maps to the device.
+
    **Threads** and **Max memory** default to **Auto**: each map is written with the fast in-memory writer, using 2 threads for extracts up to 350 MB and 1 thread above that, with the memory limit set to 80% of your installed RAM. Pick fixed values to override. **Retry in disk mode if memory runs out** (on by default) reruns a map with the slower disk-based writer when the in-memory one fails. Either way, a warning lists the maps where memory mode failed when the run ends.
 
    ![Generation of the Guyana map: the log shows the writer settings Auto picked](misc/app-run.png)
